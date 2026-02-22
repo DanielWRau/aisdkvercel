@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const askQuestions = tool({
   description:
     'Stelle dem Benutzer mehrere Fragen auf einmal als strukturierten Fragebogen mit Fortschrittsanzeige.',
+  outputSchema: z.string().describe('JSON-String mit den Benutzerantworten'),
   inputSchema: z.object({
     title: z
       .string()

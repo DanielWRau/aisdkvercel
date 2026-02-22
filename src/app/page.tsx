@@ -6,17 +6,21 @@ import {
   lastAssistantMessageIsCompleteWithToolCalls,
 } from 'ai';
 import { useState } from 'react';
-import { tools } from '@/tools/index';
+import { tools, type ChatMessage } from '@/tools/index';
 import { QuestionWizard } from '@/components/QuestionWizard';
+import { MarketResearchResults } from '@/components/MarketResearchResults';
+import { SpecDocument } from '@/components/SpecDocument';
 
 export default function Chat() {
   const [input, setInput] = useState('');
 
-  const { messages, sendMessage, addToolOutput, isLoading } = useChat({
-    transport: new DefaultChatTransport({ api: '/api/chat' }),
-    sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-    tools,
-  });
+  const { messages, sendMessage, addToolOutput, status } =
+    useChat<ChatMessage>({
+      transport: new DefaultChatTransport({ api: '/api/chat' }),
+      sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    });
+
+  const isLoading = status === 'submitted' || status === 'streaming';
 
   return (
     <div className="flex flex-col w-full max-w-2xl mx-auto min-h-screen py-12 px-4">
@@ -126,6 +130,72 @@ export default function Chat() {
                         </div>
                       );
 
+                    default:
+                      return null;
+                  }
+                }
+
+                case 'tool-marketResearch': {
+                  switch (part.state) {
+                    case 'input-streaming':
+                    case 'input-available':
+                      return (
+                        <div
+                          key={part.toolCallId}
+                          className="animate-pulse p-4 bg-white dark:bg-gray-700 rounded-lg"
+                        >
+                          Marktrecherche läuft...
+                        </div>
+                      );
+                    case 'output-available':
+                      return (
+                        <MarketResearchResults
+                          key={part.toolCallId}
+                          result={part.output}
+                        />
+                      );
+                    case 'output-error':
+                      return (
+                        <div
+                          key={part.toolCallId}
+                          className="text-sm text-red-500"
+                        >
+                          Recherche-Fehler: {part.errorText}
+                        </div>
+                      );
+                    default:
+                      return null;
+                  }
+                }
+
+                case 'tool-generateSpec': {
+                  switch (part.state) {
+                    case 'input-streaming':
+                    case 'input-available':
+                      return (
+                        <div
+                          key={part.toolCallId}
+                          className="animate-pulse p-4 bg-white dark:bg-gray-700 rounded-lg"
+                        >
+                          Leistungsbeschreibung wird erstellt...
+                        </div>
+                      );
+                    case 'output-available':
+                      return (
+                        <SpecDocument
+                          key={part.toolCallId}
+                          result={part.output}
+                        />
+                      );
+                    case 'output-error':
+                      return (
+                        <div
+                          key={part.toolCallId}
+                          className="text-sm text-red-500"
+                        >
+                          Fehler: {part.errorText}
+                        </div>
+                      );
                     default:
                       return null;
                   }

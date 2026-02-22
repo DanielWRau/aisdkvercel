@@ -9,6 +9,8 @@ import { useState } from 'react';
 import Markdown from 'react-markdown';
 import { tools, type ChatMessage } from '@/tools/index';
 import { QuestionWizard } from '@/components/QuestionWizard';
+import { MarketResearchResults } from '@/components/MarketResearchResults';
+import { SpecDocument } from '@/components/SpecDocument';
 
 type AnswerItem = {
   question: string;
@@ -20,12 +22,13 @@ export default function Bedarfsermittlung() {
   const [topic, setTopic] = useState('');
   const [started, setStarted] = useState(false);
 
-  const { messages, sendMessage, addToolOutput, isLoading } =
+  const { messages, sendMessage, addToolOutput, status } =
     useChat<ChatMessage>({
       transport: new DefaultChatTransport({ api: '/api/chat' }),
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
-      tools,
     });
+
+  const isLoading = status === 'submitted' || status === 'streaming';
 
   const handleStart = (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,25 +38,51 @@ export default function Bedarfsermittlung() {
   };
 
   // --- Typisierte Tool-Parts sammeln ---
-  const toolParts: Extract<
+  type QuestionPart = Extract<
     ChatMessage['parts'][number],
     { type: 'tool-askQuestions' }
-  >[] = [];
+  >;
+  type ResearchPart = Extract<
+    ChatMessage['parts'][number],
+    { type: 'tool-marketResearch' }
+  >;
+  type SpecPart = Extract<
+    ChatMessage['parts'][number],
+    { type: 'tool-generateSpec' }
+  >;
+
+  const questionParts: QuestionPart[] = [];
+  const researchParts: ResearchPart[] = [];
+  const specParts: SpecPart[] = [];
 
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
     for (const part of message.parts) {
       if (part.type === 'tool-askQuestions') {
-        toolParts.push(part);
+        questionParts.push(part);
+      } else if (part.type === 'tool-marketResearch') {
+        researchParts.push(part);
+      } else if (part.type === 'tool-generateSpec') {
+        specParts.push(part);
       }
     }
   }
 
-  const activeWizard = toolParts.find(p => p.state === 'input-available');
-  const streamingWizard = toolParts.find(p => p.state === 'input-streaming');
-  const completedWizards = toolParts.filter(p => p.state === 'output-available');
+  const activeWizard = questionParts.find(p => p.state === 'input-available');
+  const streamingWizard = questionParts.find(p => p.state === 'input-streaming');
+  const completedWizards = questionParts.filter(p => p.state === 'output-available');
 
-  // Alle beantworteten Fragen aus ALLEN Wizards zusammenführen
+  const activeResearch = researchParts.find(
+    p => p.state === 'input-streaming' || p.state === 'input-available',
+  );
+  const completedResearch = researchParts.filter(p => p.state === 'output-available');
+
+  const activeSpec = specParts.find(
+    p => p.state === 'input-streaming' || p.state === 'input-available',
+  );
+  const completedSpecs = specParts.filter(p => p.state === 'output-available');
+
+  // Alle beantworteten Fragen zusammenführen
   const allAnswers: AnswerItem[] = [];
   for (const wp of completedWizards) {
     try {
@@ -73,7 +102,7 @@ export default function Bedarfsermittlung() {
   for (const message of messages) {
     if (message.role !== 'assistant') continue;
     const hasToolCall = message.parts.some(
-      p => p.type === 'tool-askQuestions',
+      p => p.type === 'tool-askQuestions' || p.type === 'tool-marketResearch' || p.type === 'tool-generateSpec',
     );
     if (hasToolCall) continue;
 
@@ -148,7 +177,7 @@ export default function Bedarfsermittlung() {
       )}
 
       {/* Ladezustand */}
-      {(streamingWizard || (isLoading && !activeWizard)) && (
+      {(streamingWizard || (isLoading && !activeWizard && !activeResearch && !activeSpec)) && (
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-12 text-center animate-pulse">
           <p className="text-gray-400 text-lg">
             {streamingWizard
@@ -174,8 +203,39 @@ export default function Bedarfsermittlung() {
         />
       )}
 
+      {/* Marktrecherche läuft */}
+      {activeResearch && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-12 text-center animate-pulse">
+          <p className="text-gray-400 text-lg">
+            Marktrecherche läuft...
+          </p>
+          <p className="text-gray-400 text-sm mt-2">
+            Suche nach: &ldquo;{activeResearch.state === 'input-available' ? activeResearch.input.query : '...'}&rdquo;
+          </p>
+        </div>
+      )}
+
+      {/* Marktrecherche-Ergebnisse */}
+      {completedResearch.map(rp => (
+        <MarketResearchResults key={rp.toolCallId} result={rp.output} />
+      ))}
+
+      {/* Leistungsbeschreibung läuft */}
+      {activeSpec && (
+        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-12 text-center animate-pulse">
+          <p className="text-gray-400 text-lg">
+            Leistungsbeschreibung wird erstellt...
+          </p>
+        </div>
+      )}
+
+      {/* Leistungsbeschreibung-Ergebnisse */}
+      {completedSpecs.map(sp => (
+        <SpecDocument key={sp.toolCallId} result={sp.output} />
+      ))}
+
       {/* Error-State */}
-      {toolParts.some(p => p.state === 'output-error') && (
+      {[...questionParts, ...researchParts, ...specParts].some(p => p.state === 'output-error') && (
         <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-6">
           <p className="text-red-600 dark:text-red-400">
             Ein Fehler ist aufgetreten. Bitte versuchen Sie es erneut.
