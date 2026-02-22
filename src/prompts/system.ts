@@ -13,7 +13,7 @@ const TOOL_DESCRIPTIONS: Record<string, string> = {
   askQuestions:
     'askQuestions: Stelle dem Benutzer strukturierte Fragen mit Antwortmöglichkeiten.',
   marketResearch:
-    'marketResearch: Führe eine Marktrecherche mit Perplexity durch, um Anbieter zu finden.',
+    'marketResearch: Führe eine Marktrecherche mit Perplexity durch, um Anbieter zu finden. Unterstützt optionale Filterung nach Region (z.B. "NRW", "Bayern") und Unternehmensgröße (klein/mittel/gross).',
   generateSpec:
     'generateSpec: Erstelle eine detaillierte Leistungsbeschreibung basierend auf den gesammelten Anforderungen und der Marktrecherche.',
 };

@@ -6,16 +6,27 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:evals": "vitest run --config vitest.config.evals.ts",
+    "payload:importmap": "docker run --rm -v $(pwd):/app -v /app/node_modules -w /app node:22-slim bash -c 'npm install --legacy-peer-deps 2>/dev/null && npx payload generate:importmap'",
+    "payload:generate-types": "docker run --rm -v $(pwd):/app -v /app/node_modules -w /app node:22-slim bash -c 'npm install --legacy-peer-deps 2>/dev/null && npx payload generate:types'"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.46",
     "@ai-sdk/react": "^3.0.99",
+    "@payloadcms/db-postgres": "^3.77.0",
+    "@payloadcms/next": "^3.77.0",
+    "@payloadcms/richtext-lexical": "^3.77.0",
     "ai": "6.0.97",
+    "graphql": "^16.12.0",
     "next": "16.1.6",
+    "payload": "^3.77.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-markdown": "^10.1.0",
+    "sharp": "^0.34.5",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -26,6 +37,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

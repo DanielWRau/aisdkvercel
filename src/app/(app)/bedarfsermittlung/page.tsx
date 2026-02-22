@@ -5,12 +5,15 @@ import {
   DefaultChatTransport,
   lastAssistantMessageIsCompleteWithToolCalls,
 } from 'ai';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Markdown from 'react-markdown';
 import { tools, type ChatMessage } from '@/tools/index';
 import { QuestionWizard } from '@/components/QuestionWizard';
 import { MarketResearchResults } from '@/components/MarketResearchResults';
 import { SpecDocument } from '@/components/SpecDocument';
+import { ProjectSelector } from '@/components/ProjectSelector';
+import { SaveAllResults } from '@/components/SaveAllResults';
 
 type AnswerItem = {
   question: string;
@@ -18,9 +21,21 @@ type AnswerItem = {
   freeText?: string;
 };
 
-export default function Bedarfsermittlung() {
+export default function BedarfsermittlungPage() {
+  return (
+    <Suspense>
+      <Bedarfsermittlung />
+    </Suspense>
+  );
+}
+
+function Bedarfsermittlung() {
+  const searchParams = useSearchParams();
   const [topic, setTopic] = useState('');
   const [started, setStarted] = useState(false);
+  const [projectId, setProjectId] = useState<string | number | null>(
+    searchParams.get('project'),
+  );
 
   const { messages, sendMessage, addToolOutput, status } =
     useChat<ChatMessage>({
@@ -129,6 +144,14 @@ export default function Bedarfsermittlung() {
           </div>
 
           <form onSubmit={handleStart} className="space-y-4">
+            {!searchParams.get('project') && (
+              <div className="text-left space-y-1">
+                <label className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                  Projekt
+                </label>
+                <ProjectSelector value={projectId} onChange={setProjectId} />
+              </div>
+            )}
             <input
               value={topic}
               onChange={e => setTopic(e.target.value)}
@@ -253,6 +276,32 @@ export default function Bedarfsermittlung() {
             <Markdown>{finalText}</Markdown>
           </div>
         </div>
+      )}
+
+      {/* Ergebnisse im Projekt speichern */}
+      {finalText && !activeWizard && !isLoading && projectId && (
+        <SaveAllResults
+          projectId={projectId}
+          items={[
+            ...completedResearch.map(rp => ({
+              toolType: 'marketResearch' as const,
+              result: rp.output,
+              label: `Marktrecherche: ${rp.output.query}`,
+            })),
+            ...completedSpecs.map(sp => ({
+              toolType: 'generateSpec' as const,
+              result: sp.output,
+              label: sp.output.titel,
+            })),
+            ...(allAnswers.length > 0
+              ? [{
+                  toolType: 'askQuestions' as const,
+                  result: allAnswers,
+                  label: `Fragebogen (${allAnswers.length} Antworten)`,
+                }]
+              : []),
+          ]}
+        />
       )}
     </div>
   );
