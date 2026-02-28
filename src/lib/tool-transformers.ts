@@ -1,5 +1,8 @@
-import type { MarketResearchResult, Provider } from '@/tools/market-research'
-import type { SpecResult } from '@/tools/generate-spec'
+import { z } from 'zod'
+import type { MarketResearchResult } from '@/tools/market-research-schema'
+import type { SpecResult } from '@/tools/generate-spec-schema'
+import { formSchemas } from '@/data/form-schemas'
+import { renderFormToMarkdown, type FormStructure } from '@/lib/form-structure'
 
 export type DocumentInput = {
   title: string
@@ -13,6 +16,36 @@ export type DocumentInput = {
 type ToolTransformer<T = unknown> = {
   toDocument: (result: T) => DocumentInput
   toMarkdown: (result: T) => string
+}
+
+// --- Bedarfs Data Normalization ---
+
+const answerItemSchema = z.object({
+  question: z.string(),
+  selectedOptions: z.array(z.string()),
+  freeText: z.string().optional(),
+})
+
+const bedarfsDataSchema = z.union([
+  z.array(answerItemSchema),
+  z.object({
+    answers: z.array(answerItemSchema),
+    summary: z.string().default(''),
+  }),
+])
+
+export type AnswerItem = z.infer<typeof answerItemSchema>
+export type BedarfsData = { answers: AnswerItem[]; summary: string }
+
+export function normalizeBedarfsData(raw: unknown): BedarfsData {
+  const parsed = bedarfsDataSchema.safeParse(raw)
+  if (!parsed.success) {
+    return { answers: [], summary: '' }
+  }
+  if (Array.isArray(parsed.data)) {
+    return { answers: parsed.data, summary: '' }
+  }
+  return parsed.data
 }
 
 // --- Market Research ---
@@ -94,79 +127,80 @@ const generateSpecTransformer: ToolTransformer<SpecResult> = {
     }
   },
   toMarkdown(result) {
-    const lines: string[] = [
-      `# ${result.titel}`,
-      '',
-      `**Leistungstyp:** ${result.leistungstyp}`,
-      '',
-    ]
+    const lines: string[] = []
+
+    // Header — tolerant to partial streaming data
+    if (result.titel) lines.push(`# ${result.titel}`, '')
+    if (result.leistungstyp) lines.push(`**Leistungstyp:** ${result.leistungstyp}`, '')
 
     // Bedarf
-    lines.push('## Bedarf')
-    lines.push('')
-    lines.push(`### Ausgangssituation`)
-    lines.push(result.bedarf.ausgangssituation)
-    lines.push('')
-    lines.push(`### Problemstellung`)
-    lines.push(result.bedarf.problemstellung)
-    lines.push('')
-    lines.push(`### Bedarfsumfang`)
-    lines.push(result.bedarf.bedarfsumfang)
-    lines.push('')
+    if (result.bedarf) {
+      lines.push('## Bedarf', '')
+      if (result.bedarf.ausgangssituation) {
+        lines.push('### Ausgangssituation', result.bedarf.ausgangssituation, '')
+      }
+      if (result.bedarf.problemstellung) {
+        lines.push('### Problemstellung', result.bedarf.problemstellung, '')
+      }
+      if (result.bedarf.bedarfsumfang) {
+        lines.push('### Bedarfsumfang', result.bedarf.bedarfsumfang, '')
+      }
+    }
 
     // Ziel
-    lines.push('## Ziel')
-    lines.push('')
-    lines.push(`### Gewünschte Ergebnisse`)
-    lines.push(result.ziel.gewuenschte_ergebnisse)
-    lines.push('')
-    lines.push(`### Nutzen`)
-    lines.push(result.ziel.nutzen)
-    lines.push('')
-    if (result.ziel.erfolgskriterien?.length) {
-      lines.push(`### Erfolgskriterien`)
-      for (const k of result.ziel.erfolgskriterien) {
-        lines.push(`- ${k}`)
+    if (result.ziel) {
+      lines.push('## Ziel', '')
+      if (result.ziel.gewuenschte_ergebnisse) {
+        lines.push('### Gewünschte Ergebnisse', result.ziel.gewuenschte_ergebnisse, '')
       }
-      lines.push('')
+      if (result.ziel.nutzen) {
+        lines.push('### Nutzen', result.ziel.nutzen, '')
+      }
+      if (result.ziel.erfolgskriterien?.length) {
+        lines.push('### Erfolgskriterien')
+        for (const k of result.ziel.erfolgskriterien) {
+          lines.push(`- ${k}`)
+        }
+        lines.push('')
+      }
     }
 
     // Leistungsbereiche
     if (result.leistungsbeschreibung?.bereiche?.length) {
-      lines.push('## Leistungsbereiche')
-      lines.push('')
+      lines.push('## Leistungsbereiche', '')
       for (const bereich of result.leistungsbeschreibung.bereiche) {
-        lines.push(`### ${bereich.titel}`)
-        lines.push('')
-        lines.push(bereich.beschreibung)
-        lines.push('')
-        for (const ub of bereich.unterbereiche) {
-          lines.push(`#### ${ub.titel}`)
-          lines.push(ub.inhalt)
-          lines.push('')
+        if (bereich.titel) lines.push(`### ${bereich.titel}`, '')
+        if (bereich.beschreibung) lines.push(bereich.beschreibung, '')
+        if (bereich.unterbereiche) {
+          for (const ub of bereich.unterbereiche) {
+            if (ub.titel) lines.push(`#### ${ub.titel}`)
+            if (ub.inhalt) lines.push(ub.inhalt)
+            lines.push('')
+          }
         }
       }
     }
 
     // Zeitplanung
     if (result.zeitplanung) {
-      lines.push('## Zeitplanung')
-      lines.push('')
-      lines.push(`**Gesamtdauer:** ${result.zeitplanung.gesamtdauer_monate} Monate`)
-      lines.push('')
-      for (const ms of result.zeitplanung.meilensteine) {
-        lines.push(`### ${ms.phase} (${ms.dauer_wochen} Wochen)`)
-        lines.push('')
-        lines.push('**Aktivitäten:**')
-        for (const a of ms.aktivitaeten) {
-          lines.push(`- ${a}`)
+      lines.push('## Zeitplanung', '')
+      if (result.zeitplanung.gesamtdauer_monate) {
+        lines.push(`**Gesamtdauer:** ${result.zeitplanung.gesamtdauer_monate} Monate`, '')
+      }
+      if (result.zeitplanung.meilensteine) {
+        for (const ms of result.zeitplanung.meilensteine) {
+          if (ms.phase) lines.push(`### ${ms.phase}${ms.dauer_wochen ? ` (${ms.dauer_wochen} Wochen)` : ''}`, '')
+          if (ms.aktivitaeten?.length) {
+            lines.push('**Aktivitäten:**')
+            for (const a of ms.aktivitaeten) lines.push(`- ${a}`)
+            lines.push('')
+          }
+          if (ms.liefergegenstaende?.length) {
+            lines.push('**Liefergegenstände:**')
+            for (const l of ms.liefergegenstaende) lines.push(`- ${l}`)
+            lines.push('')
+          }
         }
-        lines.push('')
-        lines.push('**Liefergegenstände:**')
-        for (const l of ms.liefergegenstaende) {
-          lines.push(`- ${l}`)
-        }
-        lines.push('')
       }
     }
 
@@ -176,36 +210,36 @@ const generateSpecTransformer: ToolTransformer<SpecResult> = {
 
 // --- Ask Questions ---
 
-type AnswerItem = {
-  question: string
-  selectedOptions: string[]
-  freeText?: string
-}
-
-const askQuestionsTransformer: ToolTransformer<AnswerItem[]> = {
+const askQuestionsTransformer: ToolTransformer = {
   toDocument(result) {
+    const { answers, summary } = normalizeBedarfsData(result)
     return {
-      title: `Bedarfsermittlung (${result.length} Fragen)`,
-      description: `Fragebogen mit ${result.length} beantworteten Fragen`,
+      title: `Bedarfsermittlung (${answers.length} Fragen)`,
+      description: summary || `Fragebogen mit ${answers.length} beantworteten Fragen`,
       category: 'questionnaire',
       sourceToolType: 'askQuestions',
       tags: [
         { tag: 'fragebogen' },
         { tag: 'ai-generiert' },
       ],
-      jsonData: result,
+      jsonData: { answers, summary },
     }
   },
   toMarkdown(result) {
+    const { answers, summary } = normalizeBedarfsData(result)
     const lines: string[] = [
       `# Bedarfsermittlung`,
       '',
-      `> ${result.length} Fragen beantwortet`,
-      '',
     ]
 
-    for (let i = 0; i < result.length; i++) {
-      const item = result[i]
+    if (summary) {
+      lines.push('## Zusammenfassung', '', summary, '')
+    }
+
+    lines.push('')
+
+    for (let i = 0; i < answers.length; i++) {
+      const item = answers[i]
       lines.push(`**${i + 1}. ${item.question}**`)
       if (item.selectedOptions?.length) {
         lines.push(`- Auswahl: ${item.selectedOptions.join(', ')}`)
@@ -220,12 +254,182 @@ const askQuestionsTransformer: ToolTransformer<AnswerItem[]> = {
   },
 }
 
+// --- Angebotsanfrage ---
+
+const angebotsAnfrageTransformer: ToolTransformer<{ content: string }> = {
+  toDocument(result) {
+    return {
+      title: 'Angebotsanfrage',
+      description: 'KI-generierte herstellerneutrale Angebotsanfrage',
+      category: 'angebots-anfrage',
+      sourceToolType: 'angebotsAnfrage',
+      tags: [
+        { tag: 'angebotsanfrage' },
+        { tag: 'ai-generiert' },
+      ],
+      jsonData: result,
+    }
+  },
+  toMarkdown(result) {
+    return result.content
+  },
+}
+
+// --- Angebotsvergleich ---
+
+const angebotsVergleichTransformer: ToolTransformer<{ content: string; supplierCount?: number }> = {
+  toDocument(result) {
+    const suffix = result.supplierCount ? ` (${result.supplierCount} Anbieter)` : ''
+    return {
+      title: `Angebotsvergleich${suffix}`,
+      description: 'KI-generierte Angebotsauswertung',
+      category: 'angebots-vergleich',
+      sourceToolType: 'angebotsVergleich',
+      tags: [
+        { tag: 'angebotsvergleich' },
+        { tag: 'ai-generiert' },
+      ],
+      jsonData: result,
+    }
+  },
+  toMarkdown(result) {
+    return result.content
+  },
+}
+
+// --- Angebotsentwurf (Lieferantenliste) ---
+
+type AngebotsDraftData = {
+  suppliers: { id?: string; name: string; kontakt?: string; website?: string; angebotText?: string }[]
+}
+
+const angebotsDraftTransformer: ToolTransformer<AngebotsDraftData> = {
+  toDocument(result) {
+    return {
+      title: `Lieferantenliste (${result.suppliers.length} Lieferanten)`,
+      description: `Entwurf mit ${result.suppliers.length} Lieferanten`,
+      category: 'angebots-draft',
+      sourceToolType: 'angebotsDraft',
+      tags: [
+        { tag: 'lieferantenliste' },
+        { tag: 'angebotsentwurf' },
+      ],
+      jsonData: result,
+    }
+  },
+  toMarkdown(result) {
+    const lines: string[] = [
+      `# Lieferantenliste`,
+      '',
+      `> ${result.suppliers.length} Lieferanten`,
+      '',
+    ]
+
+    if (result.suppliers.length > 0) {
+      lines.push('| Name | Kontakt | Website |')
+      lines.push('|------|---------|---------|')
+      for (const s of result.suppliers) {
+        lines.push(`| ${s.name} | ${s.kontakt ?? '—'} | ${s.website ?? '—'} |`)
+      }
+      lines.push('')
+
+      for (const s of result.suppliers) {
+        if (s.angebotText) {
+          lines.push(`## ${s.name}`)
+          lines.push('')
+          lines.push(s.angebotText)
+          lines.push('')
+        }
+      }
+    }
+
+    return lines.join('\n')
+  },
+}
+
+// --- Fill Formblatt ---
+
+type FormblattResult = {
+  _meta: {
+    formularNummer: string
+    name: string
+    description?: string
+    schemaVersion: number
+    structureSnapshot?: FormStructure
+  }
+  [key: string]: unknown
+}
+
+const fillFormblattTransformer: ToolTransformer<FormblattResult> = {
+  toDocument(result) {
+    return {
+      title: `${result._meta.formularNummer}: ${result._meta.name}`,
+      description: result._meta.description ?? '',
+      category: 'formblatt',
+      sourceToolType: 'fillFormblatt',
+      tags: [
+        { tag: 'formblatt' },
+        { tag: result._meta.formularNummer },
+        { tag: 'ai-generiert' },
+      ],
+      jsonData: {
+        ...result,
+        _meta: {
+          ...result._meta,
+          schemaVersion: result._meta.schemaVersion,
+        },
+      },
+    }
+  },
+  toMarkdown(result) {
+    try {
+      const structure = result._meta?.structureSnapshot as FormStructure | undefined
+      if (structure) {
+        return renderFormToMarkdown(structure, result, {
+          formularNummer: result._meta.formularNummer,
+          name: result._meta.name,
+        })
+      }
+      // Legacy fallback for v1 documents
+      const renderer = formSchemas[result._meta.formularNummer]
+      return renderer ? renderer.toMarkdown(result) : JSON.stringify(result, null, 2)
+    } catch (err) {
+      console.error('[fillFormblatt.toMarkdown]', err)
+      return `# ${result._meta.formularNummer}\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``
+    }
+  },
+}
+
+// --- Save Document ---
+
+const saveDocumentTransformer: ToolTransformer<{ content: string }> = {
+  toDocument(result) {
+    return {
+      title: 'Dokument',
+      description: '',
+      category: 'other',
+      sourceToolType: 'saveDocument',
+      tags: [{ tag: 'ai-generiert' }],
+      jsonData: result,
+    }
+  },
+  toMarkdown(result) {
+    return result.content
+  },
+}
+
 // --- Registry ---
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- registry maps string keys to heterogeneous transformers
 const registry: Record<string, ToolTransformer<any>> = {
   marketResearch: marketResearchTransformer,
   generateSpec: generateSpecTransformer,
   askQuestions: askQuestionsTransformer,
+  angebotsDraft: angebotsDraftTransformer,
+  angebotsAnfrage: angebotsAnfrageTransformer,
+  angebotsVergleich: angebotsVergleichTransformer,
+  fillFormblatt: fillFormblattTransformer,
+  saveDocument: saveDocumentTransformer,
 }
 
 export function getTransformer(toolType: string): ToolTransformer | undefined {

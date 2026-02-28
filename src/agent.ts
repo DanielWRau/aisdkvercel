@@ -1,11 +1,25 @@
 import { ToolLoopAgent, stepCountIs } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { ai } from '@/lib/ai';
 import { tools } from '@/tools/index';
-import { getSystemPrompt } from '@/prompts';
+import { getSystemPrompt, type SystemPromptOptions } from '@/prompts';
 
-export const agent = new ToolLoopAgent({
-  model: anthropic('claude-haiku-4-5-20251001'),
-  tools,
-  instructions: getSystemPrompt(),
-  stopWhen: stepCountIs(7),
-});
+export function createAgent(options?: SystemPromptOptions) {
+  const allowedTools = options?.tools
+  const selectedTools = allowedTools
+    ? Object.fromEntries(
+        Object.entries(tools).filter(([name]) =>
+          (allowedTools as readonly string[]).includes(name)
+        )
+      )
+    : tools
+
+  return new ToolLoopAgent({
+    model: ai.languageModel('fast'),
+    tools: selectedTools,
+    instructions: getSystemPrompt(options),
+    stopWhen: stepCountIs(7),
+  });
+}
+
+// Backward-compatible default export
+export const agent = createAgent();

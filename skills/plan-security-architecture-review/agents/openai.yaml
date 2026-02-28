@@ -1,0 +1,4 @@
+interface:
+  display_name: "Plan Security Architecture Review"
+  short_description: "Senior security + architecture plan reviews"
+  default_prompt: "Use $plan-security-architecture-review to review this technical plan and write ./review-planname.md with prioritized security, architecture, scalability, reuse, and minimal-code recommendations."

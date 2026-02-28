@@ -7,12 +7,14 @@ import {
 } from '../index';
 
 describe('getSystemPrompt', () => {
-  it('includes all 3 tools by default', () => {
+  it('includes all 5 tools by default', () => {
     const prompt = getSystemPrompt();
     expect(prompt).toContain('askQuestions');
     expect(prompt).toContain('marketResearch');
     expect(prompt).toContain('generateSpec');
-    expect(prompt).toContain('3 Tools');
+    expect(prompt).toContain('knowledgeSearch');
+    expect(prompt).toContain('saveDocument');
+    expect(prompt).toContain('5 Tools');
   });
 
   it('respects custom tool list', () => {
@@ -42,14 +44,16 @@ describe('getSystemPrompt', () => {
     expect(prompt).not.toContain('erneut auf');
   });
 
-  it('includes generateSpec step when autoGenerateSpec is true', () => {
-    const prompt = getSystemPrompt({ autoGenerateSpec: true });
-    expect(prompt).toContain('generateSpec auf');
+  it('includes generateSpec step with explicit-only instruction', () => {
+    const prompt = getSystemPrompt();
+    expect(prompt).toContain('generateSpec NUR');
+    expect(prompt).toContain('EXPLIZIT');
   });
 
-  it('omits generateSpec step when autoGenerateSpec is false', () => {
-    const prompt = getSystemPrompt({ autoGenerateSpec: false });
-    expect(prompt).not.toContain('rufe generateSpec auf');
+  it('includes marketResearch step with explicit-only instruction', () => {
+    const prompt = getSystemPrompt();
+    expect(prompt).toContain('marketResearch NUR');
+    expect(prompt).toContain('NIEMALS automatisch');
   });
 
   it('includes region/size hint in marketResearch tool description', () => {

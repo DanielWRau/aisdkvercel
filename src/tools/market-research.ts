@@ -1,34 +1,20 @@
 import { tool, generateText } from 'ai';
 import { anthropic } from '@ai-sdk/anthropic';
+import { ai } from '@/lib/ai';
 import { z } from 'zod';
 import { getMarketResearchPrompt, getPerplexityConfig } from '@/prompts';
+import { marketResearchResultSchema } from './market-research-schema';
+import type { Provider, MarketResearchResult } from './market-research-schema';
 
-const providerSchema = z.object({
-  name: z.string(),
-  description: z.string(),
-  website: z.string(),
-  email: z.string().nullable().optional(),
-  phone: z.string().nullable().optional(),
-  address: z.string().nullable().optional(),
-  city: z.string().nullable().optional(),
-  strengths: z.array(z.string()),
-  groesse: z.enum(['klein', 'mittel', 'gross']).optional(),
-  reichweite: z.enum(['lokal', 'regional', 'ueberregional', 'bundesweit']).optional(),
-  spezialisierung: z.string().nullable().optional(),
-  region: z.string().nullable().optional(),
-  mitarbeiteranzahl: z.string().nullable().optional(),
-  category: z.string().optional(),
-  certifications: z.array(z.string()).optional(),
-});
+export { providerSchema, marketResearchResultSchema } from './market-research-schema';
+export type { Provider, MarketResearchResult } from './market-research-schema';
 
-export type Provider = z.infer<typeof providerSchema>;
-
-export type MarketResearchResult = {
-  providers: Provider[];
-  citations: string[];
-  searchResults: { title: string; url: string; date?: string }[];
+export type MarketResearchProgress = {
+  status: 'searching' | 'enriching';
   query: string;
-  error?: string;
+  providers: Provider[];
+  citations?: string[];
+  searchResults?: Array<{ title: string; url: string; date?: string }>;
 };
 
 /**
@@ -52,7 +38,7 @@ async function enrichSingleProvider(
     });
 
     const result = await generateText({
-      model: anthropic('claude-haiku-4-5-20251001'),
+      model: ai.languageModel('fast'),
       tools: { web_search: webSearchTool },
       prompt: `Finde die Kontaktdaten (E-Mail, Telefon, Adresse, Stadt) von ${provider.name} auf ${provider.website}. Suche nach Impressum oder Kontaktseite. Antworte AUSSCHLIESSLICH als JSON-Objekt:
 {"email": "...", "phone": "...", "address": "...", "city": "..."}
@@ -88,37 +74,6 @@ Setze Felder auf null wenn nicht gefunden. Erfinde KEINE Daten.`,
   }
 }
 
-/**
- * Enrich providers with contact data using individual Haiku + web search queries.
- * Processes up to 5 providers with concurrency of 3.
- */
-async function enrichContactData(
-  providers: Provider[],
-): Promise<Provider[]> {
-  const needsEnrichment = providers.filter(
-    (p) => !p.email || !p.phone,
-  );
-  if (needsEnrichment.length === 0) return providers;
-
-  const toEnrich = needsEnrichment.slice(0, 5);
-  const CONCURRENCY = 3;
-  const enriched = new Map<string, Provider>();
-
-  for (let i = 0; i < toEnrich.length; i += CONCURRENCY) {
-    const batch = toEnrich.slice(i, i + CONCURRENCY);
-    const results = await Promise.allSettled(
-      batch.map((p) => enrichSingleProvider(p)),
-    );
-    results.forEach((result, idx) => {
-      if (result.status === 'fulfilled') {
-        enriched.set(batch[idx].name, result.value);
-      }
-    });
-  }
-
-  return providers.map((p) => enriched.get(p.name) ?? p);
-}
-
 export const marketResearch = tool({
   description:
     'Führe eine Marktrecherche mit Perplexity durch, um Anbieter und Unternehmen für ein bestimmtes Thema zu finden. Unterstützt optionale Filterung nach Region und Unternehmensgröße.',
@@ -127,17 +82,21 @@ export const marketResearch = tool({
     region: z.string().optional().describe('Regionale Einschränkung, z.B. "NRW", "Bayern"'),
     groessenPraeferenz: z.enum(['klein', 'mittel', 'gross', 'alle']).optional().describe('Bevorzugte Unternehmensgröße'),
   }),
-  execute: async ({ query, region, groessenPraeferenz }): Promise<MarketResearchResult> => {
+  execute: async function* ({ query, region, groessenPraeferenz }) {
     const apiKey = process.env.PERPLEXITY_API_KEY;
     if (!apiKey) {
-      return {
+      yield {
         providers: [],
         citations: [],
         searchResults: [],
         query,
         error: 'PERPLEXITY_API_KEY nicht konfiguriert',
-      };
+      } satisfies MarketResearchResult;
+      return;
     }
+
+    // Preliminary: searching
+    yield { status: 'searching' as const, query, providers: [] as Provider[], citations: [] as string[], searchResults: [] as Array<{ title: string; url: string; date?: string }> };
 
     const prompt = getMarketResearchPrompt({ region, groessenPraeferenz });
 
@@ -160,13 +119,14 @@ export const marketResearch = tool({
     );
 
     if (!response.ok) {
-      return {
+      yield {
         providers: [],
         citations: [],
         searchResults: [],
         query,
         error: `Perplexity API Fehler: ${response.status}`,
-      };
+      } satisfies MarketResearchResult;
+      return;
     }
 
     const data = await response.json();
@@ -196,16 +156,40 @@ export const marketResearch = tool({
       }
     }
 
+    // Preliminary: enriching (initial providers found)
+    yield { status: 'enriching' as const, query, providers, citations, searchResults };
+
     // Zweiter Pass: Kontaktdaten anreichern für Anbieter ohne E-Mail oder Telefon
     if (providers.length > 0) {
-      providers = await enrichContactData(providers);
+      const needsEnrichment = providers.filter(
+        (p) => !p.email || !p.phone,
+      );
+
+      if (needsEnrichment.length > 0) {
+        const toEnrich = needsEnrichment.slice(0, 5);
+        const CONCURRENCY = 3;
+        const enriched = new Map<string, Provider>();
+
+        for (let i = 0; i < toEnrich.length; i += CONCURRENCY) {
+          const batch = toEnrich.slice(i, i + CONCURRENCY);
+          const results = await Promise.allSettled(
+            batch.map((p) => enrichSingleProvider(p)),
+          );
+          results.forEach((result, idx) => {
+            if (result.status === 'fulfilled') {
+              enriched.set(batch[idx].name, result.value);
+            }
+          });
+
+          // Update providers with enriched data and yield progress
+          providers = providers.map((p) => enriched.get(p.name) ?? p);
+          yield { status: 'enriching' as const, query, providers, citations, searchResults };
+        }
+      }
     }
 
-    return {
-      providers,
-      citations,
-      searchResults,
-      query,
-    };
+    // Final yield: validated MarketResearchResult
+    const finalResult = marketResearchResultSchema.parse({ providers, citations, searchResults, query });
+    yield finalResult;
   },
 });

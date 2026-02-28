@@ -9,6 +9,8 @@ export type SpecPromptOptions = {
   anzahlUnterbereiche?: [number, number];
   /** Ob Zeitplanung enthalten sein soll */
   mitZeitplanung?: boolean;
+  /** Benutzerdefinierte Gliederung — ersetzt die Standard-Struktur im Prompt */
+  gliederung?: string[];
 };
 
 const DETAIL_PRESETS: Record<
@@ -18,17 +20,17 @@ const DETAIL_PRESETS: Record<
   kurz: {
     bereiche: 2,
     unterbereiche: '1-2 Unterbereichen',
-    absaetze: '1 Absatz pro Unterbereich',
+    absaetze: '1-2 Sätze pro Unterbereich',
   },
   standard: {
     bereiche: 3,
     unterbereiche: '2-3 Unterbereichen',
-    absaetze: 'mehrere Absätze pro Unterbereich',
+    absaetze: '1 kurzer Absatz pro Unterbereich (3-5 Sätze)',
   },
   erweitert: {
     bereiche: 5,
     unterbereiche: '3-4 Unterbereichen',
-    absaetze: 'ausführliche Absätze pro Unterbereich mit konkreten Anforderungen',
+    absaetze: '1-2 Absätze pro Unterbereich mit konkreten Anforderungen',
   },
 };
 
@@ -48,6 +50,7 @@ export function getSpecGenerationPrompt(
     anzahlBereiche,
     anzahlUnterbereiche,
     mitZeitplanung = true,
+    gliederung,
   } = options;
 
   const preset = DETAIL_PRESETS[detailtiefe];
@@ -57,17 +60,23 @@ export function getSpecGenerationPrompt(
     : preset.unterbereiche;
   const stilAnweisung = STIL_ANWEISUNGEN[stil];
 
-  const strukturTeile = [
-    '1. Titel und Leistungstyp',
-    '2. Bedarf (Ausgangssituation, Problemstellung, Bedarfsumfang)',
-    '3. Ziel (Gewünschte Ergebnisse, Nutzen, Erfolgskriterien)',
-    `4. Leistungsbeschreibung (${bereiche} Hauptbereiche mit je ${unterbereiche}, ${preset.absaetze})`,
-  ];
+  // Benutzerdefinierte Gliederung hat Vorrang
+  let strukturTeile: string[];
+  if (gliederung && gliederung.length > 0) {
+    strukturTeile = [...gliederung];
+  } else {
+    strukturTeile = [
+      '1. Titel und Leistungstyp',
+      '2. Bedarf (Ausgangssituation, Problemstellung, Bedarfsumfang)',
+      '3. Ziel (Gewünschte Ergebnisse, Nutzen, Erfolgskriterien)',
+      `4. Leistungsbeschreibung (${bereiche} Hauptbereiche mit je ${unterbereiche}, ${preset.absaetze})`,
+    ];
 
-  if (mitZeitplanung) {
-    strukturTeile.push(
-      '5. Zeitplanung (Gesamtdauer, Meilensteine mit Aktivitäten und Liefergegenständen)',
-    );
+    if (mitZeitplanung) {
+      strukturTeile.push(
+        '5. Zeitplanung (Gesamtdauer, Meilensteine mit Aktivitäten und Liefergegenständen)',
+      );
+    }
   }
 
   const zeitplanungJson = mitZeitplanung
@@ -88,10 +97,10 @@ export function getSpecGenerationPrompt(
   return `Du bist ein Experte für die Erstellung von Leistungsbeschreibungen.
 
 DEINE AUFGABE:
-Erstelle eine UMFASSENDE, DETAILLIERTE Leistungsbeschreibung basierend auf dem Bedarf und ggf. der Marktrecherche.
+Erstelle eine KOMPAKTE Leistungsbeschreibung basierend auf dem Bedarf und ggf. der Marktrecherche.
 
 WICHTIGE PRINZIPIEN:
-1. Maximale Detailtiefe — Jeder Bereich wird in Unterbereiche gegliedert
+1. KÜRZE — Jeder Abschnitt auf das Wesentliche beschränkt, keine Wiederholungen
 2. Präzise, messbare und überprüfbare Formulierungen
 3. Produktneutral und technologieoffen
 4. ${stilAnweisung}
@@ -107,22 +116,22 @@ JSON-Format:
   "titel": "Aussagekräftiger Titel",
   "leistungstyp": "dienstleistung|lieferleistung|bauleistung|sonstige",
   "bedarf": {
-    "ausgangssituation": "2-3 Absätze",
-    "problemstellung": "1-2 Absätze",
-    "bedarfsumfang": "Konkrete Anforderungen"
+    "ausgangssituation": "2-3 Sätze",
+    "problemstellung": "2-3 Sätze",
+    "bedarfsumfang": "Stichpunktartig, konkret"
   },
   "ziel": {
-    "gewuenschte_ergebnisse": "Konkrete, messbare Lieferobjekte",
-    "nutzen": "Erwarteter Mehrwert",
+    "gewuenschte_ergebnisse": "Konkrete, messbare Lieferobjekte (2-3 Sätze)",
+    "nutzen": "Erwarteter Mehrwert (1-2 Sätze)",
     "erfolgskriterien": ["Kriterium 1", "Kriterium 2", "Kriterium 3"]
   },
   "leistungsbeschreibung": {
     "bereiche": [
       {
         "titel": "Bereichstitel",
-        "beschreibung": "Einleitungstext",
+        "beschreibung": "1 Satz Einleitung",
         "unterbereiche": [
-          { "titel": "Unterbereich", "inhalt": "Mehrere Absätze Fließtext" }
+          { "titel": "Unterbereich", "inhalt": "Kurzer Fließtext (${preset.absaetze})" }
         ]
       }
     ]

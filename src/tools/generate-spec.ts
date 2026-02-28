@@ -1,52 +1,28 @@
-import { tool } from 'ai';
-import { generateText } from 'ai';
-import { anthropic } from '@ai-sdk/anthropic';
+import { tool, streamObject } from 'ai';
+import { ai } from '@/lib/ai';
 import { z } from 'zod';
 import { getSpecGenerationPrompt } from '@/prompts';
+import { specResultSchema } from './generate-spec-schema';
+import type { SpecResult } from './generate-spec-schema';
 
-// --- Zod-Schema für das Ergebnis ---
-const unterbereichSchema = z.object({
-  titel: z.string(),
-  inhalt: z.string(),
-});
+export { specResultSchema } from './generate-spec-schema';
+export type { SpecResult } from './generate-spec-schema';
 
-const bereichSchema = z.object({
-  titel: z.string(),
-  beschreibung: z.string(),
-  unterbereiche: z.array(unterbereichSchema),
-});
-
-const meilensteinSchema = z.object({
-  phase: z.string(),
-  dauer_wochen: z.number(),
-  aktivitaeten: z.array(z.string()),
-  liefergegenstaende: z.array(z.string()),
-});
-
-const specResultSchema = z.object({
-  titel: z.string(),
-  leistungstyp: z.string(),
-  bedarf: z.object({
-    ausgangssituation: z.string(),
-    problemstellung: z.string(),
-    bedarfsumfang: z.string(),
-  }),
-  ziel: z.object({
-    gewuenschte_ergebnisse: z.string(),
-    nutzen: z.string(),
-    erfolgskriterien: z.array(z.string()),
-  }),
-  leistungsbeschreibung: z.object({
-    bereiche: z.array(bereichSchema),
-  }),
-  zeitplanung: z.object({
-    gesamtdauer_monate: z.number(),
-    meilensteine: z.array(meilensteinSchema),
-  }),
-});
-
-export type SpecResult = z.infer<typeof specResultSchema> & {
-  error?: string;
+const emptyResult: SpecResult = {
+  titel: '',
+  leistungstyp: '',
+  bedarf: {
+    ausgangssituation: '',
+    problemstellung: '',
+    bedarfsumfang: '',
+  },
+  ziel: {
+    gewuenschte_ergebnisse: '',
+    nutzen: '',
+    erfolgskriterien: [],
+  },
+  leistungsbeschreibung: { bereiche: [] },
+  zeitplanung: { gesamtdauer_monate: 0, meilensteine: [] },
 };
 
 export const generateSpec = tool({
@@ -64,8 +40,20 @@ export const generateSpec = tool({
       .describe(
         'Zusammenfassung der Marktrecherche (Anbieter, Zertifizierungen, Marktstruktur)',
       ),
+    detailtiefe: z
+      .enum(['kurz', 'standard', 'erweitert'])
+      .optional()
+      .describe('Detailtiefe: kurz (2 Bereiche), standard (3), erweitert (5)'),
+    stil: z
+      .enum(['formal', 'einfach'])
+      .optional()
+      .describe('Sprachstil: formal (Fachsprache) oder einfach'),
+    mitZeitplanung: z
+      .boolean()
+      .optional()
+      .describe('Ob eine Zeitplanung enthalten sein soll'),
   }),
-  execute: async ({ anforderungen, marktkontext }): Promise<SpecResult> => {
+  execute: async function* ({ anforderungen, marktkontext, detailtiefe, stil, mitZeitplanung }) {
     try {
       const userContent = [
         `Erstelle eine Leistungsbeschreibung für folgenden Bedarf:`,
@@ -76,57 +64,27 @@ export const generateSpec = tool({
           : '',
       ].join('\n');
 
-      const { text } = await generateText({
-        model: anthropic('claude-haiku-4-5-20251001'),
-        system: getSpecGenerationPrompt(),
+      const result = streamObject({
+        model: ai.languageModel('fast'),
+        schema: specResultSchema,
+        system: getSpecGenerationPrompt({
+          detailtiefe: detailtiefe ?? 'standard',
+          stil: stil ?? 'formal',
+          mitZeitplanung: mitZeitplanung ?? true,
+        }),
         prompt: userContent,
       });
 
-      // JSON extrahieren
-      let parsed: SpecResult;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        const match = text.match(/\{[\s\S]*\}/);
-        if (!match) {
-          return {
-            titel: '',
-            leistungstyp: '',
-            bedarf: {
-              ausgangssituation: '',
-              problemstellung: '',
-              bedarfsumfang: '',
-            },
-            ziel: {
-              gewuenschte_ergebnisse: '',
-              nutzen: '',
-              erfolgskriterien: [],
-            },
-            leistungsbeschreibung: { bereiche: [] },
-            zeitplanung: { gesamtdauer_monate: 0, meilensteine: [] },
-            error: 'Leistungsbeschreibung konnte nicht generiert werden.',
-          };
-        }
-        parsed = JSON.parse(match[0]);
+      // Yield partial objects as preliminary results
+      for await (const partialObject of result.partialObjectStream) {
+        yield partialObject as Partial<SpecResult>;
       }
 
-      return parsed;
+      // Final yield: complete validated SpecResult
+      yield await result.object;
     } catch (err) {
-      return {
-        titel: '',
-        leistungstyp: '',
-        bedarf: {
-          ausgangssituation: '',
-          problemstellung: '',
-          bedarfsumfang: '',
-        },
-        ziel: {
-          gewuenschte_ergebnisse: '',
-          nutzen: '',
-          erfolgskriterien: [],
-        },
-        leistungsbeschreibung: { bereiche: [] },
-        zeitplanung: { gesamtdauer_monate: 0, meilensteine: [] },
+      yield {
+        ...emptyResult,
         error: `Fehler: ${err instanceof Error ? err.message : 'Unbekannt'}`,
       };
     }

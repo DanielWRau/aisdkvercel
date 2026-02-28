@@ -2,26 +2,31 @@ import type { CollectionConfig } from 'payload'
 
 export const Documents: CollectionConfig = {
   slug: 'documents',
-  upload: {
-    staticDir: 'media/documents',
-    mimeTypes: [
-      'application/pdf',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/plain',
-      'text/markdown',
-      'image/png',
-      'image/jpeg',
-    ],
-  },
   versions: { drafts: true, maxPerDoc: 20 },
   admin: {
     useAsTitle: 'title',
-    defaultColumns: ['title', 'project', 'category', 'createdAt'],
+    defaultColumns: ['title', 'project', 'category', 'workflowStatus', 'updatedAt'],
   },
   fields: [
-    { name: 'title', type: 'text', required: true },
-    { name: 'description', type: 'textarea' },
+    {
+      name: 'title',
+      type: 'text',
+      required: true,
+    },
+    {
+      name: 'description',
+      type: 'textarea',
+    },
+    {
+      name: 'markdown',
+      type: 'textarea',
+    },
+    {
+      name: 'attachments',
+      type: 'relationship',
+      relationTo: 'media',
+      hasMany: true,
+    },
     {
       name: 'project',
       type: 'relationship',
@@ -32,11 +37,15 @@ export const Documents: CollectionConfig = {
       name: 'category',
       type: 'select',
       options: [
-        { label: 'Spezifikation', value: 'spec' },
+        { label: 'Specification', value: 'spec' },
         { label: 'Research', value: 'research' },
-        { label: 'Vertrag', value: 'contract' },
-        { label: 'Fragebogen', value: 'questionnaire' },
-        { label: 'Sonstiges', value: 'other' },
+        { label: 'Contract', value: 'contract' },
+        { label: 'Questionnaire', value: 'questionnaire' },
+        { label: 'Angebotsentwurf', value: 'angebots-draft' },
+        { label: 'Angebotsanfrage', value: 'angebots-anfrage' },
+        { label: 'Angebotsvergleich', value: 'angebots-vergleich' },
+        { label: 'Formblatt', value: 'formblatt' },
+        { label: 'Other', value: 'other' },
       ],
       admin: { position: 'sidebar' },
     },
@@ -44,26 +53,36 @@ export const Documents: CollectionConfig = {
       name: 'sourceToolType',
       type: 'select',
       options: [
-        { label: 'Marktrecherche', value: 'marketResearch' },
-        { label: 'Leistungsbeschreibung', value: 'generateSpec' },
-        { label: 'Fragebogen', value: 'askQuestions' },
-        { label: 'Manuell', value: 'manual' },
+        { label: 'Market Research', value: 'marketResearch' },
+        { label: 'Specification', value: 'generateSpec' },
+        { label: 'Questionnaire', value: 'askQuestions' },
+        { label: 'Lieferantenliste', value: 'angebotsDraft' },
+        { label: 'Angebotsanfrage', value: 'angebotsAnfrage' },
+        { label: 'Angebotsvergleich', value: 'angebotsVergleich' },
+        { label: 'Formblatt-Ausfüllung', value: 'fillFormblatt' },
+        { label: 'Dokument speichern', value: 'saveDocument' },
+        { label: 'Manual', value: 'manual' },
       ],
       admin: { position: 'sidebar' },
     },
     {
       name: 'jsonData',
       type: 'json',
-      admin: { description: 'Strukturierte Tool-Ausgabe (vom System verwaltet)' },
+      admin: {
+        condition: (data) => Boolean(data?.jsonData),
+      },
     },
     {
-      name: 'status',
+      name: 'workflowStatus',
       type: 'select',
       defaultValue: 'draft',
       options: [
         { label: 'Entwurf', value: 'draft' },
-        { label: 'In Review', value: 'review' },
+        { label: 'In Prüfung', value: 'review' },
+        { label: 'Überarbeitung', value: 'revision' },
         { label: 'Freigegeben', value: 'approved' },
+        { label: 'Final', value: 'final' },
+        { label: 'Archiviert', value: 'archived' },
       ],
       admin: { position: 'sidebar' },
     },
@@ -72,9 +91,24 @@ export const Documents: CollectionConfig = {
       type: 'array',
       fields: [{ name: 'tag', type: 'text' }],
     },
-    { name: 'content', type: 'richText' },
   ],
   hooks: {
+    beforeDelete: [
+      async ({ req, id }) => {
+        const doc = await req.payload.findByID({ collection: 'documents', id, req })
+        if (doc.attachments?.length) {
+          const ids = doc.attachments.map((a: { id: string | number } | string | number) =>
+            typeof a === 'object' ? a.id : a,
+          )
+          await req.payload.delete({
+            collection: 'media',
+            where: { id: { in: ids } },
+            req,
+            overrideAccess: true,
+          })
+        }
+      },
+    ],
     beforeChange: [
       async ({ data, req, operation }) => {
         if (operation !== 'create' || !data?.project) return data
@@ -84,12 +118,15 @@ export const Documents: CollectionConfig = {
           id: data.project,
         })
 
-        if (!data.category && project.settings?.defaultCategory) {
-          data.category = project.settings.defaultCategory
+        const projectData = (project.data as Record<string, unknown>) ?? {}
+        const settings = (projectData.settings as Record<string, unknown>) ?? {}
+
+        if (!data.category && settings.defaultCategory) {
+          data.category = settings.defaultCategory as string
         }
 
-        if (project.settings?.requireApproval) {
-          data.status = 'draft'
+        if (settings.requireApproval) {
+          data.workflowStatus = 'draft'
         }
 
         return data
@@ -97,9 +134,21 @@ export const Documents: CollectionConfig = {
     ],
   },
   access: {
-    read: () => true,
-    create: () => true,
-    update: ({ req: { user } }) => Boolean(user),
-    delete: ({ req: { user } }) => user?.role === 'admin',
+    read: ({ req: { user } }) => {
+      if (!user) return false
+      if (user.role === 'admin') return true
+      return { 'project.owner': { equals: user.id } }
+    },
+    create: ({ req: { user } }) => Boolean(user),
+    update: ({ req: { user } }) => {
+      if (!user) return false
+      if (user.role === 'admin') return true
+      return { 'project.owner': { equals: user.id } }
+    },
+    delete: ({ req: { user } }) => {
+      if (!user) return false
+      if (user.role === 'admin') return true
+      return { 'project.owner': { equals: user.id } }
+    },
   },
 }

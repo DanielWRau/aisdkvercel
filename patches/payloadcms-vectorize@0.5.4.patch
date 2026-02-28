@@ -1,0 +1,31 @@
+diff --git a/package.json b/package.json
+index 6710be32e70ec2248667eb328e5a2fee0de4f7af..6082604eea30883a0b6510ef6e9ad9db5473e9a6 100644
+--- a/package.json
++++ b/package.json
+@@ -6,18 +6,18 @@
+   "type": "module",
+   "exports": {
+     ".": {
+-      "import": "./src/index.ts",
+-      "types": "./src/index.ts",
+-      "default": "./src/index.ts"
++      "import": "./dist/index.js",
++      "types": "./dist/index.d.ts",
++      "default": "./dist/index.js"
+     },
+     "./client": {
+-      "import": "./src/exports/client.ts",
+-      "types": "./src/exports/client.ts",
+-      "default": "./src/exports/client.ts"
++      "import": "./dist/exports/client.js",
++      "types": "./dist/exports/client.d.ts",
++      "default": "./dist/exports/client.js"
+     }
+   },
+-  "main": "./src/index.ts",
+-  "types": "./src/index.ts",
++  "main": "./dist/index.js",
++  "types": "./dist/index.d.ts",
+   "files": [
+     "dist"
+   ],

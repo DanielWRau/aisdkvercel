@@ -42,3 +42,6 @@ next-env.d.ts
 .pnpm-store/
 package-lock.json
 media/
+
+# Formblätter-PDFs (lokal als Schema-Referenz, nicht im Repo)
+src/data/bayern-formblaetter/

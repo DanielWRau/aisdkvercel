@@ -1,24 +1,58 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SAMPLE_SPEC } from '@/__tests__/helpers/sample-data';
 
-// Mock generateText from ai
+// Mock streamObject from ai
 vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>();
   return {
     ...actual,
-    generateText: vi.fn(),
+    streamObject: vi.fn(),
   };
 });
 
-// Mock anthropic provider
-vi.mock('@ai-sdk/anthropic', () => ({
-  anthropic: vi.fn(() => 'mock-model'),
+// Mock AI provider
+vi.mock('@/lib/ai', () => ({
+  ai: { languageModel: vi.fn(() => 'mock-model') },
 }));
 
-const { generateText } = await import('ai');
+// Mock session context (no sessionId during tests)
+vi.mock('@/lib/session-context', () => ({
+  getSessionId: vi.fn(() => undefined),
+}));
+
+const { streamObject } = await import('ai');
 const { generateSpec } = await import('../generate-spec');
 
-const mockedGenerateText = vi.mocked(generateText);
+const mockedStreamObject = vi.mocked(streamObject);
+
+function createMockStreamResult(resolvedObject: unknown) {
+  async function* emptyStream() {
+    yield resolvedObject;
+  }
+  return {
+    partialObjectStream: emptyStream(),
+    object: Promise.resolve(resolvedObject),
+  };
+}
+
+function createMockStreamError(error: Error) {
+  async function* emptyStream() {
+    // stream yields nothing before error
+  }
+  return {
+    partialObjectStream: emptyStream(),
+    object: Promise.reject(error),
+  };
+}
+
+/** Helper: consume an async generator and return the last yielded value */
+async function consumeGenerator<T>(gen: AsyncGenerator<T>): Promise<T> {
+  let last: T | undefined;
+  for await (const value of gen) {
+    last = value;
+  }
+  return last!;
+}
 
 describe('generateSpec', () => {
   beforeEach(() => {
@@ -29,15 +63,16 @@ describe('generateSpec', () => {
     vi.restoreAllMocks();
   });
 
-  it('parses valid JSON spec from generateText response', async () => {
-    mockedGenerateText.mockResolvedValue({
-      text: JSON.stringify(SAMPLE_SPEC),
-    } as never);
+  it('parses valid JSON spec from streamObject response', async () => {
+    mockedStreamObject.mockReturnValue(
+      createMockStreamResult(SAMPLE_SPEC) as never,
+    );
 
-    const result = await generateSpec.execute!(
+    const gen = generateSpec.execute!(
       { anforderungen: 'Gebäudereinigung für 5000m²' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.titel).toBe('Leistungsbeschreibung Gebäudereinigung');
     expect(result.leistungstyp).toBe('dienstleistung');
@@ -47,77 +82,82 @@ describe('generateSpec', () => {
     expect(result.error).toBeUndefined();
   });
 
-  it('extracts JSON from markdown-wrapped response', async () => {
-    const wrappedText = `Hier ist die Leistungsbeschreibung:\n\`\`\`json\n${JSON.stringify(SAMPLE_SPEC)}\n\`\`\``;
-    mockedGenerateText.mockResolvedValue({ text: wrappedText } as never);
+  it('returns error skeleton on streamObject exception', async () => {
+    mockedStreamObject.mockReturnValue(
+      createMockStreamError(new Error('API down')) as never,
+    );
 
-    const result = await generateSpec.execute!(
+    const gen = generateSpec.execute!(
       { anforderungen: 'Test' },
       { toolCallId: 'test', messages: [] },
     );
-
-    expect(result.titel).toBe('Leistungsbeschreibung Gebäudereinigung');
-  });
-
-  it('returns error skeleton when JSON is unparseable', async () => {
-    mockedGenerateText.mockResolvedValue({
-      text: 'this is not json',
-    } as never);
-
-    const result = await generateSpec.execute!(
-      { anforderungen: 'Test' },
-      { toolCallId: 'test', messages: [] },
-    );
-
-    expect(result.error).toBe(
-      'Leistungsbeschreibung konnte nicht generiert werden.',
-    );
-    expect(result.titel).toBe('');
-    expect(result.leistungsbeschreibung.bereiche).toHaveLength(0);
-    expect(result.zeitplanung.gesamtdauer_monate).toBe(0);
-  });
-
-  it('returns error skeleton on generateText exception', async () => {
-    mockedGenerateText.mockRejectedValue(new Error('API down'));
-
-    const result = await generateSpec.execute!(
-      { anforderungen: 'Test' },
-      { toolCallId: 'test', messages: [] },
-    );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.error).toBe('Fehler: API down');
     expect(result.titel).toBe('');
   });
 
   it('includes marktkontext in prompt when provided', async () => {
-    mockedGenerateText.mockResolvedValue({
-      text: JSON.stringify(SAMPLE_SPEC),
-    } as never);
+    mockedStreamObject.mockReturnValue(
+      createMockStreamResult(SAMPLE_SPEC) as never,
+    );
 
-    await generateSpec.execute!(
+    const gen = generateSpec.execute!(
       {
         anforderungen: 'Reinigung',
         marktkontext: 'Es gibt 3 regionale Anbieter mit ISO-Zertifizierung',
       },
       { toolCallId: 'test', messages: [] },
     );
+    await consumeGenerator(gen as AsyncGenerator);
 
-    const call = mockedGenerateText.mock.calls[0][0];
+    const call = mockedStreamObject.mock.calls[0][0];
     expect(call.prompt).toContain('MARKTKONTEXT');
     expect(call.prompt).toContain('ISO-Zertifizierung');
   });
 
   it('omits marktkontext section when not provided', async () => {
-    mockedGenerateText.mockResolvedValue({
-      text: JSON.stringify(SAMPLE_SPEC),
-    } as never);
+    mockedStreamObject.mockReturnValue(
+      createMockStreamResult(SAMPLE_SPEC) as never,
+    );
 
-    await generateSpec.execute!(
+    const gen = generateSpec.execute!(
       { anforderungen: 'Reinigung' },
       { toolCallId: 'test', messages: [] },
     );
+    await consumeGenerator(gen as AsyncGenerator);
 
-    const call = mockedGenerateText.mock.calls[0][0];
+    const call = mockedStreamObject.mock.calls[0][0];
     expect(call.prompt).not.toContain('MARKTKONTEXT');
+  });
+
+  it('yields partial objects during streaming', async () => {
+    const partial1 = { titel: 'Test' };
+    const partial2 = { titel: 'Test', leistungstyp: 'dienstleistung' };
+
+    async function* partialStream() {
+      yield partial1;
+      yield partial2;
+    }
+
+    mockedStreamObject.mockReturnValue({
+      partialObjectStream: partialStream(),
+      object: Promise.resolve(SAMPLE_SPEC),
+    } as never);
+
+    const gen = generateSpec.execute!(
+      { anforderungen: 'Test' },
+      { toolCallId: 'test', messages: [] },
+    );
+
+    const allYields: unknown[] = [];
+    for await (const value of gen as AsyncGenerator) {
+      allYields.push(value);
+    }
+
+    // Should have partial1, partial2, and the final SAMPLE_SPEC
+    expect(allYields.length).toBe(3);
+    expect((allYields[0] as { titel: string }).titel).toBe('Test');
+    expect((allYields[2] as { titel: string }).titel).toBe(SAMPLE_SPEC.titel);
   });
 });

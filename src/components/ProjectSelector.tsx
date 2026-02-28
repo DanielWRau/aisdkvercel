@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { listProjects, createProject } from '@/actions/projects'
+import { listProjectsMeta, createProject } from '@/actions/projects'
 
 type Project = { id: string | number; name: string }
 
@@ -18,7 +18,7 @@ export function ProjectSelector({
   const [newName, setNewName] = useState('')
 
   useEffect(() => {
-    listProjects()
+    listProjectsMeta()
       .then(setProjects)
       .finally(() => setLoading(false))
   }, [])
@@ -26,7 +26,7 @@ export function ProjectSelector({
   const handleCreate = async () => {
     if (!newName.trim()) return
     setLoading(true)
-    const project = await createProject(newName.trim())
+    const project = await createProject({ name: newName.trim() })
     setProjects((prev) => [project, ...prev])
     onChange(project.id)
     setNewName('')

@@ -20,7 +20,12 @@ vi.mock('ai', async (importOriginal) => {
   };
 });
 
-// Mock @ai-sdk/anthropic
+// Mock session context (no sessionId during tests)
+vi.mock('@/lib/session-context', () => ({
+  getSessionId: vi.fn(() => undefined),
+}));
+
+// Mock @ai-sdk/anthropic (still needed for anthropic.tools.webSearch)
 vi.mock('@ai-sdk/anthropic', () => ({
   anthropic: Object.assign(
     (model: string) => ({ modelId: model }),
@@ -35,8 +40,22 @@ vi.mock('@ai-sdk/anthropic', () => ({
   ),
 }));
 
+// Mock AI provider
+vi.mock('@/lib/ai', () => ({
+  ai: { languageModel: vi.fn(() => ({ modelId: 'mock-model' })) },
+}));
+
 // Import after mocks are set up
 const { marketResearch } = await import('../market-research');
+
+/** Helper: consume an async generator and return the last yielded value */
+async function consumeGenerator<T>(gen: AsyncGenerator<T>): Promise<T> {
+  let last: T | undefined;
+  for await (const value of gen) {
+    last = value;
+  }
+  return last!;
+}
 
 describe('marketResearch', () => {
   const originalEnv = process.env;
@@ -56,10 +75,11 @@ describe('marketResearch', () => {
       searchResults: [{ title: 'CleanPro', url: 'https://cleanpro.de' }],
     });
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'Gebäudereinigung Berlin' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.providers).toHaveLength(3);
     expect(result.providers[0].name).toBe('CleanPro GmbH');
@@ -84,10 +104,11 @@ describe('marketResearch', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'Reinigung' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.providers).toHaveLength(3);
   });
@@ -95,10 +116,11 @@ describe('marketResearch', () => {
   it('returns error when API key is missing', async () => {
     delete process.env.PERPLEXITY_API_KEY;
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'test' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.error).toBe('PERPLEXITY_API_KEY nicht konfiguriert');
     expect(result.providers).toHaveLength(0);
@@ -107,10 +129,11 @@ describe('marketResearch', () => {
   it('returns error on API failure', async () => {
     mockPerplexityError(500);
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'test' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.error).toBe('Perplexity API Fehler: 500');
     expect(result.providers).toHaveLength(0);
@@ -128,10 +151,11 @@ describe('marketResearch', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'test' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.providers).toHaveLength(0);
     expect(result.error).toBeUndefined();
@@ -140,10 +164,11 @@ describe('marketResearch', () => {
   it('sends correct headers and body to Perplexity', async () => {
     const mockFetch = mockPerplexityFetch([]);
 
-    await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'IT-Sicherheit' },
       { toolCallId: 'test', messages: [] },
     );
+    await consumeGenerator(gen as AsyncGenerator);
 
     expect(mockFetch).toHaveBeenCalledWith(
       'https://api.perplexity.ai/chat/completions',
@@ -160,10 +185,11 @@ describe('marketResearch', () => {
   it('accepts optional region and groessenPraeferenz parameters', async () => {
     mockPerplexityFetch(SAMPLE_PROVIDERS);
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'Reinigung', region: 'NRW', groessenPraeferenz: 'mittel' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.providers).toHaveLength(3);
     expect(result.error).toBeUndefined();
@@ -193,10 +219,11 @@ describe('marketResearch', () => {
       }),
     } as Awaited<ReturnType<typeof generateText>>);
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'Reinigung' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     expect(result.providers[0].email).toBe('found@cleanpro.de');
     expect(result.providers[0].phone).toBe('+49 30 9999999');
@@ -210,10 +237,11 @@ describe('marketResearch', () => {
 
     mockPerplexityFetch(SAMPLE_PROVIDERS);
 
-    await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'Reinigung' },
       { toolCallId: 'test', messages: [] },
     );
+    await consumeGenerator(gen as AsyncGenerator);
 
     expect(mockGenerateText).not.toHaveBeenCalled();
   });
@@ -229,13 +257,36 @@ describe('marketResearch', () => {
     mockPerplexityFetch(providersWithMissingContact);
     mockGenerateText.mockRejectedValueOnce(new Error('API Error'));
 
-    const result = await marketResearch.execute!(
+    const gen = marketResearch.execute!(
       { query: 'Reinigung' },
       { toolCallId: 'test', messages: [] },
     );
+    const result = await consumeGenerator(gen as AsyncGenerator);
 
     // Should still return providers even if enrichment fails
     expect(result.providers).toHaveLength(1);
     expect(result.error).toBeUndefined();
+  });
+
+  it('yields preliminary results during execution', async () => {
+    mockPerplexityFetch(SAMPLE_PROVIDERS);
+
+    const gen = marketResearch.execute!(
+      { query: 'Reinigung' },
+      { toolCallId: 'test', messages: [] },
+    );
+    const allYields: unknown[] = [];
+    for await (const value of gen as AsyncGenerator) {
+      allYields.push(value);
+    }
+
+    // Should have at least: searching, enriching, final
+    expect(allYields.length).toBeGreaterThanOrEqual(3);
+    // First yield should have status 'searching'
+    expect((allYields[0] as { status: string }).status).toBe('searching');
+    // Last yield should be the final result (no status field)
+    const last = allYields[allYields.length - 1] as { providers: unknown[]; status?: string };
+    expect(last.providers).toBeDefined();
+    expect(last.status).toBeUndefined();
   });
 });
