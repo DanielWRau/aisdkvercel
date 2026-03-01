@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react'
 
 type StatusFooterContextType = {
   statusText: string
@@ -23,8 +23,13 @@ export function StatusFooterProvider({ children }: { children: ReactNode }) {
     setCopyContentRaw(content)
   }, [])
 
+  const value = useMemo(
+    () => ({ statusText, setStatusText, copyContent, setCopyContent }),
+    [statusText, setStatusText, copyContent, setCopyContent],
+  )
+
   return (
-    <StatusFooterContext.Provider value={{ statusText, setStatusText, copyContent, setCopyContent }}>
+    <StatusFooterContext.Provider value={value}>
       {children}
     </StatusFooterContext.Provider>
   )

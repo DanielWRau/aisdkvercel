@@ -37,7 +37,7 @@ export function useProjectChat({
   const key = storageKey(projectId, chatMode)
 
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID())
-  const [initialMessages] = useState(() => loadMessages(key))
+  const [initialMessages] = useState(() => loadMessages(key) as ChatMessage[] | undefined)
 
   const chat = useChat<ChatMessage>({
     id: `${projectId}-${chatMode}`,

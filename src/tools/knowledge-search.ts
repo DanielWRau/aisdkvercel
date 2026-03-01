@@ -55,14 +55,7 @@ async function fetchAllDocs(
   let page = 1
   let hasMore = true
 
-  const baseWhere: Where = collection === 'documents'
-    ? {
-        and: [
-          { project: { equals: ctx.projectId } },
-          { content: { not_equals: null } },
-        ],
-      }
-    : { project: { equals: ctx.projectId } }
+  const baseWhere: Where = { project: { equals: ctx.projectId } }
 
   while (hasMore) {
     const result = await payload.find({

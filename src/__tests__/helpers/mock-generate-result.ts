@@ -13,8 +13,9 @@ export function makeGenerateResult(
     finishReason: { unified: 'stop', raw: 'stop' },
     usage: {
       inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
-      outputTokens: { total: 20, noCache: 20 },
+      outputTokens: { total: 20, text: 20, reasoning: undefined },
     },
+    warnings: [],
     ...overrides,
   };
 }
@@ -39,8 +40,9 @@ export function makeToolCallResult(
     finishReason: { unified: 'tool-calls', raw: 'tool_use' },
     usage: {
       inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined },
-      outputTokens: { total: 20, noCache: 20 },
+      outputTokens: { total: 20, text: 20, reasoning: undefined },
     },
+    warnings: [],
     ...overrides,
   };
 }

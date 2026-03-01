@@ -68,6 +68,7 @@
     }
   },
   "devDependencies": {
+    "@ai-sdk/provider": "3.0.8",
     "@tailwindcss/postcss": "^4",
     "@types/jsdom": "^28.0.0",
     "@types/node": "^20",

@@ -60,9 +60,11 @@ export function getSpecGenerationPrompt(
     : preset.unterbereiche;
   const stilAnweisung = STIL_ANWEISUNGEN[stil];
 
+  const hasCustomGliederung = gliederung && gliederung.length > 0;
+
   // Benutzerdefinierte Gliederung hat Vorrang
   let strukturTeile: string[];
-  if (gliederung && gliederung.length > 0) {
+  if (hasCustomGliederung) {
     strukturTeile = [...gliederung];
   } else {
     strukturTeile = [
@@ -94,6 +96,15 @@ export function getSpecGenerationPrompt(
   }`
     : '';
 
+  // When custom gliederung is provided, add explicit mapping instruction
+  const gliederungAnweisung = hasCustomGliederung
+    ? `\nWICHTIG — BENUTZERDEFINIERTE GLIEDERUNG:
+Erstelle für JEDEN der ${gliederung.length} Gliederungspunkte oben EXAKT einen Bereich in "leistungsbeschreibung.bereiche".
+Der "titel" jedes Bereichs muss dem jeweiligen Gliederungspunkt entsprechen.
+Die Unterbereiche sollen die in Klammern genannten Aspekte abdecken.
+Weiche NICHT von der vorgegebenen Gliederung ab — keine Punkte weglassen, keine hinzufügen.`
+    : '';
+
   return `Du bist ein Experte für die Erstellung von Leistungsbeschreibungen.
 
 DEINE AUFGABE:
@@ -108,7 +119,7 @@ WICHTIGE PRINZIPIEN:
 
 STRUKTUR:
 ${strukturTeile.join('\n')}
-
+${gliederungAnweisung}
 Antworte AUSSCHLIESSLICH mit einem JSON-Objekt. Kein Markdown, keine Erklärungen.
 
 JSON-Format:

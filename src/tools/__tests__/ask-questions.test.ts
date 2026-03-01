@@ -1,9 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { askQuestions } from '../ask-questions';
 
+type AskQuestionsInput = {
+  title: string;
+  questions: Array<{
+    question: string;
+    options: string[];
+    allowFreeText: boolean;
+    freeTextPlaceholder?: string;
+  }>;
+};
+
 describe('askQuestions', () => {
   describe('inputSchema', () => {
-    const schema = askQuestions.inputSchema;
+    const schema = askQuestions.inputSchema as { parse: (input: unknown) => AskQuestionsInput };
 
     it('accepts valid input with all fields', () => {
       const input = {

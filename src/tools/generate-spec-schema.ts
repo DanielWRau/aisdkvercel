@@ -38,7 +38,7 @@ export const specResultSchema = z.object({
   zeitplanung: z.object({
     gesamtdauer_monate: z.number(),
     meilensteine: z.array(meilensteinSchema),
-  }),
+  }).optional(),
 });
 
 export type SpecResult = z.infer<typeof specResultSchema> & {

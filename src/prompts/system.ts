@@ -2,6 +2,19 @@ import { getKnowledgeChatPrompt } from './knowledge-chat'
 
 export type Fragenstil = 'standard' | 'technisch' | 'einfach' | 'it-fokus' | 'kaufmaennisch' | 'vergabeverfahren';
 
+export type MarketResearchSettings = {
+  region?: string;
+  groessenPraeferenz: 'klein' | 'mittel' | 'gross' | 'alle';
+};
+
+export type SpecSettings = {
+  detailtiefe: 'kurz' | 'standard' | 'erweitert';
+  stil: 'formal' | 'einfach';
+  mitZeitplanung: boolean;
+  /** Aufgelöste Gliederungspunkte (aus Vorlage oder eigene) */
+  gliederung?: string[];
+};
+
 export type SystemPromptOptions = {
   /** Chat-Modus: workflow (Bedarfsermittlung) oder knowledge (Dokumenten-Q&A) */
   mode?: 'workflow' | 'knowledge';
@@ -13,6 +26,10 @@ export type SystemPromptOptions = {
   maxFrageRunden?: number;
   /** Stil der Rückfragen in der Bedarfsanalyse */
   fragenstil?: Fragenstil;
+  /** Einstellungen für die Marktrecherche — werden als System-Prompt-Anweisung injiziert */
+  marketResearchSettings?: MarketResearchSettings;
+  /** Einstellungen für die Leistungsbeschreibung — werden als System-Prompt-Anweisung injiziert */
+  specSettings?: SpecSettings;
 };
 
 const FRAGENSTIL_ANWEISUNGEN: Record<Fragenstil, string> = {
@@ -93,6 +110,45 @@ export function getSystemPrompt(options: SystemPromptOptions = {}): string {
     ? `\nWICHTIG: Rufe Tools DIREKT auf, schreibe KEINEN Text davor. Kein "Ich helfe dir gerne", kein "Lass mich fragen" — einfach direkt das Tool aufrufen.`
     : '';
 
+  // Build market research settings instruction block
+  let marketResearchSettingsBlock = '';
+  if (options.marketResearchSettings && tools.includes('marketResearch')) {
+    const m = options.marketResearchSettings;
+    const hasSettings = m.region || (m.groessenPraeferenz && m.groessenPraeferenz !== 'alle');
+    if (hasSettings) {
+      const lines = [
+        `\nMARKTRECHERCHE-EINSTELLUNGEN:`,
+        `Wenn du marketResearch aufrufst, verwende EXAKT diese Parameter:`,
+      ];
+      if (m.region) {
+        lines.push(`  region: "${m.region}"`);
+      }
+      if (m.groessenPraeferenz && m.groessenPraeferenz !== 'alle') {
+        lines.push(`  groessenPraeferenz: "${m.groessenPraeferenz}"`);
+      }
+      lines.push(`Diese Werte stammen aus den Benutzereinstellungen und dürfen NICHT verändert werden.`);
+      marketResearchSettingsBlock = lines.join('\n');
+    }
+  }
+
+  // Build spec settings instruction block if specSettings provided and generateSpec is available
+  let specSettingsBlock = '';
+  if (options.specSettings && tools.includes('generateSpec')) {
+    const s = options.specSettings;
+    const lines = [
+      `\nLEISTUNGSBESCHREIBUNGS-EINSTELLUNGEN:`,
+      `Wenn du generateSpec aufrufst, verwende EXAKT diese Parameter:`,
+      `  detailtiefe: "${s.detailtiefe}"`,
+      `  stil: "${s.stil}"`,
+      `  mitZeitplanung: ${s.mitZeitplanung}`,
+    ];
+    if (s.gliederung && s.gliederung.length > 0) {
+      lines.push(`  gliederung: ${JSON.stringify(s.gliederung)}`);
+    }
+    lines.push(`Diese Werte stammen aus den Benutzereinstellungen und dürfen NICHT verändert werden.`);
+    specSettingsBlock = lines.join('\n');
+  }
+
   return `Du bist ein hilfreicher Assistent für Bedarfsermittlung, Marktrecherche und Leistungsbeschreibungen.
 
 Du hast ${tools.length === 1 ? 'ein Tool' : `${tools.length} Tools`}:
@@ -104,9 +160,11 @@ Warte IMMER auf eine explizite Benutzeranfrage.
 Nach der Beantwortung ALLER Fragerunden, schreibe eine kurze Zusammenfassung
 der Anforderungen als Fließtext (2-3 Sätze). Beginne direkt mit dem Inhalt.
 KEINE Überschriften wie "Zusammenfassung der Anforderungen:".
+KEINE Rückfragen, Angebote oder Vorschläge nach der Zusammenfassung (z.B. NICHT "Benötigen Sie eine Marktrecherche..." oder "Soll ich...").
 KEINE "Nächste Schritte" oder Handlungsempfehlungen anfügen.
 KEINE Anzahl der Fragen erwähnen.
+Die Zusammenfassung ist der LETZTE Text — danach kommt NICHTS mehr.
 
 Vorgehen:
-${steps.join('\n')}`;
+${steps.join('\n')}${marketResearchSettingsBlock}${specSettingsBlock}`;
 }

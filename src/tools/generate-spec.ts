@@ -22,7 +22,6 @@ const emptyResult: SpecResult = {
     erfolgskriterien: [],
   },
   leistungsbeschreibung: { bereiche: [] },
-  zeitplanung: { gesamtdauer_monate: 0, meilensteine: [] },
 };
 
 export const generateSpec = tool({
@@ -52,8 +51,12 @@ export const generateSpec = tool({
       .boolean()
       .optional()
       .describe('Ob eine Zeitplanung enthalten sein soll'),
+    gliederung: z
+      .array(z.string())
+      .optional()
+      .describe('Benutzerdefinierte Gliederungspunkte. Ersetzt die Standard-Gliederung.'),
   }),
-  execute: async function* ({ anforderungen, marktkontext, detailtiefe, stil, mitZeitplanung }) {
+  execute: async function* ({ anforderungen, marktkontext, detailtiefe, stil, mitZeitplanung, gliederung }) {
     try {
       const userContent = [
         `Erstelle eine Leistungsbeschreibung für folgenden Bedarf:`,
@@ -71,6 +74,7 @@ export const generateSpec = tool({
           detailtiefe: detailtiefe ?? 'standard',
           stil: stil ?? 'formal',
           mitZeitplanung: mitZeitplanung ?? true,
+          gliederung,
         }),
         prompt: userContent,
       });

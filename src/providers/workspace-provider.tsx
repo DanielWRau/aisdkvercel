@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useState, useCallback, useMemo, type ReactNode } from 'react'
 
 export type WorkspaceTab = 'bedarfsanalyse' | 'marktanalyse' | 'leistungsbeschreibung'
 
@@ -36,38 +36,41 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const updateTabContent = useCallback(
     (tab: WorkspaceTab, content: unknown, status: TabContent['status'], options?: UpdateTabOptions) => {
-      setTabContents((prev) => ({
-        ...prev,
-        [tab]: {
-          status,
-          content,
-          version: (status === 'done' && !options?.skipVersionBump)
-            ? prev[tab].version + 1
-            : prev[tab].version,
-        },
-      }))
-      // Auto-switch tab on 'done' or 'streaming'
-      if (status === 'done' || status === 'streaming') {
-        setActiveTab(tab)
-      }
+      setTabContents((prev) => {
+        const existing = prev[tab]
+        const version = (status === 'done' && !options?.skipVersionBump)
+          ? existing.version + 1
+          : existing.version
+        // Skip update if nothing meaningful changed to prevent render cascades
+        if (existing.status === status && existing.content === content && existing.version === version) {
+          return prev
+        }
+        return {
+          ...prev,
+          [tab]: { status, content, version },
+        }
+      })
     },
     [],
   )
 
   const setTabVersion = useCallback(
     (tab: WorkspaceTab, version: number) => {
-      setTabContents((prev) => ({
-        ...prev,
-        [tab]: { ...prev[tab], version },
-      }))
+      setTabContents((prev) => {
+        if (prev[tab].version === version) return prev
+        return { ...prev, [tab]: { ...prev[tab], version } }
+      })
     },
     [],
   )
 
+  const value = useMemo(
+    () => ({ activeTab, setActiveTab, tabContents, updateTabContent, setTabVersion }),
+    [activeTab, tabContents, updateTabContent, setTabVersion],
+  )
+
   return (
-    <WorkspaceContext.Provider
-      value={{ activeTab, setActiveTab, tabContents, updateTabContent, setTabVersion }}
-    >
+    <WorkspaceContext.Provider value={value}>
       {children}
     </WorkspaceContext.Provider>
   )

@@ -66,39 +66,30 @@ export async function updateUserSettings(data: {
   const payload = await getPayloadClient()
 
   try {
-    await payload.create({
+    const existing = await payload.find({
       collection: 'user-settings',
-      data: { ...data, user: user.id },
+      where: { user: { equals: user.id } },
+      limit: 1,
       user,
     })
-    return { success: true }
-  } catch (err) {
-    // Unique constraint violation → find existing and update
-    const isUniqueError =
-      err instanceof Error &&
-      (err.message.includes('unique') ||
-        err.message.includes('duplicate') ||
-        err.message.includes('UNIQUE'))
 
-    if (isUniqueError) {
-      const existing = await payload.find({
+    if (existing.docs[0]) {
+      await payload.update({
         collection: 'user-settings',
-        where: { user: { equals: user.id } },
-        limit: 1,
+        id: existing.docs[0].id,
+        data,
         user,
       })
-
-      if (existing.docs[0]) {
-        await payload.update({
-          collection: 'user-settings',
-          id: existing.docs[0].id,
-          data,
-          user,
-        })
-        return { success: true }
-      }
+    } else {
+      await payload.create({
+        collection: 'user-settings',
+        data: { ...data, user: user.id },
+        user,
+      })
     }
 
+    return { success: true }
+  } catch (err) {
     return {
       success: false,
       error: err instanceof Error ? err.message : 'Fehler beim Speichern der Einstellungen',

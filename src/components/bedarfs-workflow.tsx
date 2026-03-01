@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useChat } from '@ai-sdk/react'
 import {
   DefaultChatTransport,
@@ -19,14 +19,12 @@ import {
   Loader2,
   Settings,
   Download,
-  AlertTriangle,
 } from 'lucide-react'
 import {
   WorkflowSettingsDialog,
   DEFAULT_SETTINGS,
   type WorkflowSettings,
 } from '@/components/workflow-settings'
-import { getVorlageById } from '@/data/gliederung-vorlagen'
 
 type WorkflowDocument = {
   id: string | number
@@ -63,15 +61,11 @@ export function BedarfsWorkflow({
   const [exporting, setExporting] = useState(false)
   const [settings, setSettings] = useState<WorkflowSettings>(DEFAULT_SETTINGS)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [persistWarning, setPersistWarning] = useState(false)
-
   // Refs for saved data from documents (used when chat is empty)
   const savedAnswersRef = useRef<AnswerItem[]>([])
   const savedResearchRef = useRef<MarketResearchResult | null>(null)
   const savedSpecRef = useRef<SpecResult | null>(null)
 
-  // Auto-save tracking
-  const savedIds = useRef(new Set<string>())
   // Version bump tracking — only bump once per workflow run
   const bedarfsDoneRef = useRef(false)
   const researchDoneRef = useRef(false)
@@ -82,12 +76,17 @@ export function BedarfsWorkflow({
   const sessionIdRef = useRef(crypto.randomUUID())
   const sessionId = sessionIdRef.current
 
+  const transport = useMemo(
+    () => new DefaultChatTransport({
+      api: '/api/chat',
+      headers: { 'x-session-id': sessionId, 'x-project-id': String(project.id) },
+    }),
+    [sessionId, project.id],
+  )
+
   const { messages, sendMessage, addToolOutput, status } =
     useChat<ChatMessage>({
-      transport: new DefaultChatTransport({
-        api: '/api/chat',
-        headers: { 'x-session-id': sessionId, 'x-project-id': String(project.id) },
-      }),
+      transport,
       sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     })
 
@@ -224,23 +223,34 @@ export function BedarfsWorkflow({
     }
   }
 
+  // Stable content references to avoid unnecessary context updates.
+  // updateTabContent skips updates when content === prev, so we cache
+  // the object and only create a new one when values actually change.
+  const bedarfsContentRef = useRef<{ answers: AnswerItem[]; summary: string }>({ answers: [], summary: '' })
+  if (
+    allAnswers.length !== bedarfsContentRef.current.answers.length ||
+    analysisSummary !== bedarfsContentRef.current.summary
+  ) {
+    bedarfsContentRef.current = { answers: allAnswers, summary: analysisSummary }
+  }
+
   // Update workspace tabs when tool outputs are available.
   // Shows streaming content in right panel while AI generates summary.
   // Version is synced from Payload CMS after save, not bumped in-memory.
   useEffect(() => {
     if (allAnswers.length > 0 && !activeWizard && !streamingWizard) {
-      const tabStatus = isLoading ? 'streaming' : 'done'
+      const tabStatus = (phase === 'questions' && isLoading) ? 'streaming' : 'done'
       if (tabStatus === 'done' && analysisSummary !== '' && !bedarfsDoneRef.current) {
         bedarfsDoneRef.current = true
       }
       updateTabContent(
         'bedarfsanalyse',
-        { answers: allAnswers, summary: analysisSummary },
+        bedarfsContentRef.current,
         tabStatus,
         { skipVersionBump: true },
       )
     }
-  }, [allAnswers.length, activeWizard, streamingWizard, isLoading, analysisSummary]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [allAnswers.length, activeWizard, streamingWizard, isLoading, analysisSummary, phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Spec streaming: show partial in right panel
   useEffect(() => {
@@ -275,28 +285,9 @@ export function BedarfsWorkflow({
     }
   }, [completedSpecs.length, activeSpec?.toolCallId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save: askQuestions results (save ALL answers when new wizards complete)
-  useEffect(() => {
-    const hasNewWizard = completedWizards.some(wp => !savedIds.current.has(wp.toolCallId))
-    if (!hasNewWizard || allAnswers.length === 0) return
-
-    for (const wp of completedWizards) {
-      savedIds.current.add(wp.toolCallId)
-    }
-
-    saveToolResult({
-      toolType: 'askQuestions',
-      result: { answers: allAnswers, summary: analysisSummary },
-      projectId: project.id,
-    }).then((r) => {
-      if (r.success) {
-        if (r.versionCount) setTabVersion('bedarfsanalyse', r.versionCount)
-        if (onDocumentSaved) onDocumentSaved(r.document ?? { id: r.documentId })
-      }
-    })
-  }, [completedWizards.length]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-save: update askQuestions document with final summary once all rounds are done
+  // Auto-save: enrich askQuestions document with final summary once all rounds are done.
+  // The server already persists answers per round via onStepFinish; this client-side
+  // save only adds the summary text that the agent generates after the last round.
   useEffect(() => {
     if (
       allAnswers.length > 0 &&
@@ -318,52 +309,9 @@ export function BedarfsWorkflow({
     }
   }, [analysisSummary, isLoading, activeWizard, streamingWizard]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-save: marketResearch results (client-side fallback)
-  useEffect(() => {
-    for (const rp of completedResearch) {
-      if (savedIds.current.has(rp.toolCallId)) continue
-      savedIds.current.add(rp.toolCallId)
-
-      saveToolResult({
-        toolType: 'marketResearch',
-        result: rp.output,
-        projectId: project.id,
-      }).then((r) => {
-        if (r.success) {
-          if (r.versionCount) setTabVersion('marktanalyse', r.versionCount)
-          if (onDocumentSaved) onDocumentSaved(r.document ?? { id: r.documentId })
-        }
-        if (!r.success) {
-          console.error('[bedarfs-workflow] marketResearch save failed:', r.error)
-          setPersistWarning(true)
-        }
-      })
-    }
-  }, [completedResearch.length]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-save: generateSpec results (client-side fallback)
-  useEffect(() => {
-    for (const sp of completedSpecs) {
-      if (savedIds.current.has(sp.toolCallId)) continue
-      savedIds.current.add(sp.toolCallId)
-
-      saveToolResult({
-        toolType: 'generateSpec',
-        result: sp.output,
-        projectId: project.id,
-      }).then((r) => {
-        if (r.success) {
-          if (r.versionCount) setTabVersion('leistungsbeschreibung', r.versionCount)
-          if (onDocumentSaved) onDocumentSaved(r.document ?? { id: r.documentId })
-        }
-        if (!r.success) {
-          console.error('[bedarfs-workflow] generateSpec save failed:', r.error)
-        }
-      })
-    }
-  }, [completedSpecs.length]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Refresh documents from DB when stream finishes
+  // Refresh documents & sync version counts from DB when stream finishes.
+  // Server-side onStepFinish is the authoritative save for marketResearch,
+  // generateSpec, and askQuestions — the client only syncs UI state here.
   const prevStatusRef = useRef(status)
   useEffect(() => {
     const prev = prevStatusRef.current
@@ -373,6 +321,20 @@ export function BedarfsWorkflow({
       getProjectDocuments(project.id).then((docs) => {
         if (onDocumentSaved && docs.length > 0) {
           onDocumentSaved(docs[0])
+        }
+        // Sync version counts for workflow tabs (one doc per type, most recent first)
+        const tabMap: Record<string, string> = {
+          askQuestions: 'bedarfsanalyse',
+          marketResearch: 'marktanalyse',
+          generateSpec: 'leistungsbeschreibung',
+        }
+        const seen = new Set<string>()
+        for (const doc of docs) {
+          const tabId = tabMap[doc.sourceToolType as string]
+          if (tabId && !seen.has(tabId) && doc.workflowStatus !== 'archived') {
+            seen.add(tabId)
+            getDocumentVersionCount(doc.id).then(count => setTabVersion(tabId, count))
+          }
         }
       })
     }
@@ -399,6 +361,7 @@ export function BedarfsWorkflow({
 
   // --- Independent step handlers ---
   const handleBedarfsanalyse = () => {
+    setActiveTab('bedarfsanalyse')
     bedarfsDoneRef.current = false
     lastPersistedSummary.current = ''
     setPhase('questions')
@@ -408,6 +371,7 @@ export function BedarfsWorkflow({
   }
 
   const handleMarktanalyse = () => {
+    setActiveTab('marktanalyse')
     const answers = allAnswers.length > 0 ? allAnswers : savedAnswersRef.current
     const answersText = answers
       .map((a) => {
@@ -418,46 +382,15 @@ export function BedarfsWorkflow({
       })
       .join('\n')
 
-    const researchHints: string[] = []
-    if (settings.region) {
-      researchHints.push(`Region: ${settings.region}`)
-    }
-    if (settings.groessenPraeferenz !== 'alle') {
-      const labels: Record<string, string> = { klein: 'kleine', mittel: 'mittlere', gross: 'große' }
-      researchHints.push(`Bevorzugte Unternehmensgröße: ${labels[settings.groessenPraeferenz]}`)
-    }
-    const hintsText = researchHints.length > 0
-      ? `\n\nEinstellungen für die Marktrecherche:\n${researchHints.join('\n')}`
-      : ''
-
     researchDoneRef.current = false
     setPhase('research')
     sendMessage({
-      text: `Basierend auf diesen Antworten:\n${answersText}\n\nFühre eine Marktrecherche durch.${hintsText}`,
+      text: `Basierend auf diesen Antworten:\n${answersText}\n\nFühre eine Marktrecherche durch.`,
     })
   }
 
   const handleLeistungsbeschreibung = () => {
-    const specHints: string[] = []
-    const detailLabels: Record<string, string> = {
-      kurz: 'Kurz (2 Hauptbereiche)',
-      standard: 'Standard (3 Hauptbereiche)',
-      erweitert: 'Erweitert (5 Hauptbereiche)',
-    }
-    specHints.push(`Detailtiefe: ${detailLabels[settings.detailtiefe]}`)
-    specHints.push(`Sprachstil: ${settings.stil === 'formal' ? 'Formal / Fachsprache' : 'Einfache Sprache'}`)
-    if (!settings.mitZeitplanung) {
-      specHints.push('Zeitplanung: Nicht einbeziehen')
-    }
-
-    if (settings.eigeneGliederungAktiv && settings.eigeneGliederung) {
-      specHints.push(`Gliederung (benutzerdefiniert):\n${settings.eigeneGliederung}`)
-    } else if (settings.gliederungVorlage && settings.gliederungVorlage !== 'standard') {
-      const vorlage = getVorlageById(settings.gliederungVorlage)
-      if (vorlage) {
-        specHints.push(`Gliederungsvorlage: ${vorlage.name}\nStruktur:\n${vorlage.gliederung.join('\n')}`)
-      }
-    }
+    setActiveTab('leistungsbeschreibung')
 
     // Build context from ALL available data (chat + saved)
     const answers = allAnswers.length > 0 ? allAnswers : savedAnswersRef.current
@@ -481,7 +414,7 @@ export function BedarfsWorkflow({
     specDoneRef.current = false
     setPhase('spec')
     sendMessage({
-      text: `Erstelle jetzt basierend auf den Anforderungen${research?.providers?.length ? ' und der Marktrecherche' : ''} eine detaillierte Leistungsbeschreibung.\n\n${contextText}\n\nEinstellungen:\n${specHints.join('\n')}`,
+      text: `Erstelle jetzt basierend auf den Anforderungen${research?.providers?.length ? ' und der Marktrecherche' : ''} eine detaillierte Leistungsbeschreibung.\n\n${contextText}`,
     })
   }
 
@@ -651,21 +584,6 @@ export function BedarfsWorkflow({
             <p className="text-xs text-muted-foreground mt-1">
               Das Dokument wird im rechten Panel aufgebaut.
             </p>
-          </div>
-        )}
-
-        {/* Persistence warning */}
-        {persistWarning && (
-          <div className="rounded-lg border border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20 p-4 flex items-start gap-3">
-            <AlertTriangle className="h-5 w-5 text-yellow-600 shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                Marktrecherche konnte nicht gespeichert werden.
-              </p>
-              <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1">
-                Bitte exportieren Sie die Ergebnisse.
-              </p>
-            </div>
           </div>
         )}
 

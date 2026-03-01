@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { SpecResult } from '../generate-spec-schema';
 import { SAMPLE_SPEC } from '@/__tests__/helpers/sample-data';
 
 // Mock streamObject from ai
@@ -46,12 +47,12 @@ function createMockStreamError(error: Error) {
 }
 
 /** Helper: consume an async generator and return the last yielded value */
-async function consumeGenerator<T>(gen: AsyncGenerator<T>): Promise<T> {
-  let last: T | undefined;
+async function consumeGenerator(gen: AsyncGenerator): Promise<SpecResult & { error?: string }> {
+  let last: unknown;
   for await (const value of gen) {
     last = value;
   }
-  return last!;
+  return last as SpecResult & { error?: string };
 }
 
 describe('generateSpec', () => {
@@ -129,6 +130,27 @@ describe('generateSpec', () => {
 
     const call = mockedStreamObject.mock.calls[0][0];
     expect(call.prompt).not.toContain('MARKTKONTEXT');
+  });
+
+  it('passes gliederung to getSpecGenerationPrompt', async () => {
+    mockedStreamObject.mockReturnValue(
+      createMockStreamResult(SAMPLE_SPEC) as never,
+    );
+
+    const gliederung = ['1. Gegenstand', '2. Anforderungen', '3. Zeitplan'];
+    const gen = generateSpec.execute!(
+      { anforderungen: 'Reinigung', gliederung },
+      { toolCallId: 'test', messages: [] },
+    );
+    await consumeGenerator(gen as AsyncGenerator);
+
+    const call = mockedStreamObject.mock.calls[0][0];
+    // The system prompt should contain the custom gliederung items
+    expect(call.system).toContain('1. Gegenstand');
+    expect(call.system).toContain('2. Anforderungen');
+    expect(call.system).toContain('3. Zeitplan');
+    // Should NOT contain the default structure
+    expect(call.system).not.toContain('Titel und Leistungstyp');
   });
 
   it('yields partial objects during streaming', async () => {

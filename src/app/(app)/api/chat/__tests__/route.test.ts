@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Mock dependencies
 const mockCreateAgent = vi.fn(() => ({ type: 'agent' }))
 vi.mock('@/agent', () => ({
-  createAgent: (...args: unknown[]) => mockCreateAgent(...args),
+  createAgent: (...args: Parameters<typeof mockCreateAgent>) => mockCreateAgent(...args),
 }))
 
 vi.mock('ai', async (importOriginal) => {

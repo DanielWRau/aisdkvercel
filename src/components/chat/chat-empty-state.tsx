@@ -1,7 +1,7 @@
 'use client'
 
 import { Button } from '@/components/ui/button'
-import { MessageSquare } from 'lucide-react'
+import { DinoIcon } from '@/components/DinoIcon'
 
 type ChatEmptyStateProps = {
   title?: string
@@ -18,7 +18,7 @@ export function ChatEmptyState({
 }: ChatEmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 text-center p-6">
-      <MessageSquare className="size-10 text-muted-foreground/40" />
+      <DinoIcon size={40} className="text-muted-foreground/40" />
       <div>
         <h3 className="text-lg font-medium">{title}</h3>
         <p className="text-sm text-muted-foreground mt-1">{description}</p>

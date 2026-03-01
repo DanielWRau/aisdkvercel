@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { MarketResearchResult } from '../market-research-schema';
 import { SAMPLE_PROVIDERS } from '@/__tests__/helpers/sample-data';
 import {
   mockPerplexityFetch,
@@ -49,12 +50,12 @@ vi.mock('@/lib/ai', () => ({
 const { marketResearch } = await import('../market-research');
 
 /** Helper: consume an async generator and return the last yielded value */
-async function consumeGenerator<T>(gen: AsyncGenerator<T>): Promise<T> {
-  let last: T | undefined;
+async function consumeGenerator(gen: AsyncGenerator): Promise<MarketResearchResult & { error?: string; status?: string }> {
+  let last: unknown;
   for await (const value of gen) {
     last = value;
   }
-  return last!;
+  return last as MarketResearchResult & { error?: string; status?: string };
 }
 
 describe('marketResearch', () => {

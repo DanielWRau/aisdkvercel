@@ -61,6 +61,116 @@ describe('getSystemPrompt', () => {
     expect(prompt).toContain('Region');
     expect(prompt).toContain('Unternehmensgröße');
   });
+
+  it('injects marketResearchSettings with region and groessenPraeferenz', () => {
+    const prompt = getSystemPrompt({
+      marketResearchSettings: {
+        region: 'NRW',
+        groessenPraeferenz: 'mittel',
+      },
+    });
+    expect(prompt).toContain('MARKTRECHERCHE-EINSTELLUNGEN');
+    expect(prompt).toContain('region: "NRW"');
+    expect(prompt).toContain('groessenPraeferenz: "mittel"');
+    expect(prompt).toContain('dürfen NICHT verändert werden');
+  });
+
+  it('injects marketResearchSettings with region only', () => {
+    const prompt = getSystemPrompt({
+      marketResearchSettings: {
+        region: 'Bayern',
+        groessenPraeferenz: 'alle',
+      },
+    });
+    expect(prompt).toContain('MARKTRECHERCHE-EINSTELLUNGEN');
+    expect(prompt).toContain('region: "Bayern"');
+    expect(prompt).not.toContain('groessenPraeferenz');
+  });
+
+  it('omits marketResearchSettings block when groessenPraeferenz is alle and no region', () => {
+    const prompt = getSystemPrompt({
+      marketResearchSettings: {
+        groessenPraeferenz: 'alle',
+      },
+    });
+    expect(prompt).not.toContain('MARKTRECHERCHE-EINSTELLUNGEN');
+  });
+
+  it('omits marketResearchSettings block when not provided', () => {
+    const prompt = getSystemPrompt();
+    expect(prompt).not.toContain('MARKTRECHERCHE-EINSTELLUNGEN');
+  });
+
+  it('omits marketResearchSettings block when marketResearch not in tools', () => {
+    const prompt = getSystemPrompt({
+      tools: ['askQuestions', 'generateSpec'],
+      marketResearchSettings: {
+        region: 'NRW',
+        groessenPraeferenz: 'mittel',
+      },
+    });
+    expect(prompt).not.toContain('MARKTRECHERCHE-EINSTELLUNGEN');
+  });
+
+  it('injects specSettings into prompt when provided', () => {
+    const prompt = getSystemPrompt({
+      specSettings: {
+        detailtiefe: 'kurz',
+        stil: 'einfach',
+        mitZeitplanung: false,
+        gliederung: ['1. Gegenstand', '2. Anforderungen'],
+      },
+    });
+    expect(prompt).toContain('LEISTUNGSBESCHREIBUNGS-EINSTELLUNGEN');
+    expect(prompt).toContain('detailtiefe: "kurz"');
+    expect(prompt).toContain('stil: "einfach"');
+    expect(prompt).toContain('mitZeitplanung: false');
+    expect(prompt).toContain('1. Gegenstand');
+    expect(prompt).toContain('2. Anforderungen');
+    expect(prompt).toContain('dürfen NICHT verändert werden');
+  });
+
+  it('omits specSettings block when not provided', () => {
+    const prompt = getSystemPrompt();
+    expect(prompt).not.toContain('LEISTUNGSBESCHREIBUNGS-EINSTELLUNGEN');
+  });
+
+  it('omits gliederung line when gliederung is undefined', () => {
+    const prompt = getSystemPrompt({
+      specSettings: {
+        detailtiefe: 'standard',
+        stil: 'formal',
+        mitZeitplanung: true,
+      },
+    });
+    expect(prompt).toContain('LEISTUNGSBESCHREIBUNGS-EINSTELLUNGEN');
+    expect(prompt).toContain('detailtiefe: "standard"');
+    expect(prompt).not.toContain('gliederung:');
+  });
+
+  it('omits specSettings block in knowledge mode', () => {
+    const prompt = getSystemPrompt({
+      mode: 'knowledge',
+      specSettings: {
+        detailtiefe: 'kurz',
+        stil: 'einfach',
+        mitZeitplanung: false,
+      },
+    });
+    expect(prompt).not.toContain('LEISTUNGSBESCHREIBUNGS-EINSTELLUNGEN');
+  });
+
+  it('omits specSettings block when generateSpec not in tools', () => {
+    const prompt = getSystemPrompt({
+      tools: ['askQuestions', 'knowledgeSearch'],
+      specSettings: {
+        detailtiefe: 'kurz',
+        stil: 'einfach',
+        mitZeitplanung: false,
+      },
+    });
+    expect(prompt).not.toContain('LEISTUNGSBESCHREIBUNGS-EINSTELLUNGEN');
+  });
 });
 
 describe('getMarketResearchPrompt', () => {
@@ -207,5 +317,27 @@ describe('getSpecGenerationPrompt', () => {
       anzahlUnterbereiche: [2, 5],
     });
     expect(prompt).toContain('2-5 Unterbereichen');
+  });
+
+  it('includes gliederung mapping instruction for custom gliederung', () => {
+    const gliederung = [
+      '1. Gegenstand und Ziel',
+      '2. Rahmenbedingungen',
+      '3. Leistungsumfang',
+    ];
+    const prompt = getSpecGenerationPrompt({ gliederung });
+    expect(prompt).toContain('BENUTZERDEFINIERTE GLIEDERUNG');
+    expect(prompt).toContain('3 Gliederungspunkte');
+    expect(prompt).toContain('EXAKT einen Bereich');
+    expect(prompt).toContain('1. Gegenstand und Ziel');
+    expect(prompt).toContain('2. Rahmenbedingungen');
+    expect(prompt).toContain('3. Leistungsumfang');
+    // Should not contain default structure items
+    expect(prompt).not.toContain('Titel und Leistungstyp');
+  });
+
+  it('omits gliederung instruction without custom gliederung', () => {
+    const prompt = getSpecGenerationPrompt();
+    expect(prompt).not.toContain('BENUTZERDEFINIERTE GLIEDERUNG');
   });
 });

@@ -14,7 +14,7 @@ type MessagePart = {
 
 type Message = {
   id: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'system'
   parts: MessagePart[]
 }
 

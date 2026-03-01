@@ -49,7 +49,7 @@ export const DEFAULT_SETTINGS: WorkflowSettings = {
   groessenPraeferenz: 'alle',
   detailtiefe: 'standard',
   stil: 'formal',
-  mitZeitplanung: true,
+  mitZeitplanung: false,
   gliederungVorlage: 'standard',
   eigeneGliederungAktiv: false,
   eigeneGliederung: '',
@@ -100,6 +100,7 @@ export function WorkflowSettingsDialog({
   const [draft, setDraft] = useState<WorkflowSettings>(settings)
   const [loaded, setLoaded] = useState(false)
   const [saving, startSaving] = useTransition()
+  const [error, setError] = useState<string | null>(null)
 
   // Load persisted settings from DB on first open
   useEffect(() => {
@@ -125,10 +126,15 @@ export function WorkflowSettingsDialog({
   }
 
   const handleSave = () => {
+    setError(null)
     startSaving(async () => {
-      await updateUserSettings({ workflowSettings: toSettingsData(draft) })
-      onSave(draft)
-      onOpenChange(false)
+      const result = await updateUserSettings({ workflowSettings: toSettingsData(draft) })
+      if (result.success) {
+        onSave(draft)
+        onOpenChange(false)
+      } else {
+        setError(result.error ?? 'Fehler beim Speichern')
+      }
     })
   }
 
@@ -303,32 +309,42 @@ export function WorkflowSettingsDialog({
               />
             </div>
 
-            <div className="space-y-1.5">
-              <Label htmlFor="gliederung">Gliederungsvorlage</Label>
-              <Select
-                value={draft.gliederungVorlage}
-                onValueChange={(v) =>
-                  setDraft((s) => ({ ...s, gliederungVorlage: v }))
+            <div className="flex items-center justify-between">
+              <Label htmlFor="eigene-gliederung-toggle">Eigene Gliederung verwenden</Label>
+              <Switch
+                id="eigene-gliederung-toggle"
+                checked={draft.eigeneGliederungAktiv}
+                onCheckedChange={(v) =>
+                  setDraft((s) => ({ ...s, eigeneGliederungAktiv: v }))
                 }
-                disabled={draft.eigeneGliederungAktiv}
-              >
-                <SelectTrigger id="gliederung">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {GLIEDERUNG_VORLAGEN.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!draft.eigeneGliederungAktiv && (
+              />
+            </div>
+
+            {!draft.eigeneGliederungAktiv && (
+              <div className="space-y-1.5">
+                <Label htmlFor="gliederung">Gliederungsvorlage</Label>
+                <Select
+                  value={draft.gliederungVorlage}
+                  onValueChange={(v) =>
+                    setDraft((s) => ({ ...s, gliederungVorlage: v }))
+                  }
+                >
+                  <SelectTrigger id="gliederung">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GLIEDERUNG_VORLAGEN.map((v) => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {v.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="text-xs text-muted-foreground">
                   {selectedVorlage?.beschreibung ?? ''}
                 </p>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Vorschau der gewählten Vorlage */}
             {!draft.eigeneGliederungAktiv && selectedVorlage && (
@@ -341,18 +357,6 @@ export function WorkflowSettingsDialog({
                 </div>
               </div>
             )}
-
-            {/* Eigene Gliederung Checkbox */}
-            <div className="flex items-center justify-between">
-              <Label htmlFor="eigene-gliederung-aktiv">Eigene Gliederung verwenden</Label>
-              <Switch
-                id="eigene-gliederung-aktiv"
-                checked={draft.eigeneGliederungAktiv}
-                onCheckedChange={(v) =>
-                  setDraft((s) => ({ ...s, eigeneGliederungAktiv: v }))
-                }
-              />
-            </div>
 
             {/* Freitext für eigene Gliederung */}
             {draft.eigeneGliederungAktiv && (
@@ -375,6 +379,10 @@ export function WorkflowSettingsDialog({
             )}
           </TabsContent>
         </Tabs>
+
+        {error && (
+          <p className="text-sm text-destructive">{error}</p>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>

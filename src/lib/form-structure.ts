@@ -173,10 +173,19 @@ function fieldToZod(field: FormField): z.ZodType {
         for (const col of field.spalten) {
           rowShape[col.id] = fieldToZod(col)
         }
-        let arraySchema = z.array(z.object(rowShape)).describe(field.beschreibung ?? field.label)
-        if (field.minZeilen) arraySchema = arraySchema.min(field.minZeilen)
-        if (field.maxZeilen) arraySchema = arraySchema.max(field.maxZeilen)
-        schema = arraySchema
+        // Note: .min()/.max() on arrays produce minItems/maxItems in JSON Schema,
+        // which the Anthropic API rejects for values > 1. Row count constraints
+        // are communicated via the field description instead.
+        const rowConstraint = field.minZeilen && field.maxZeilen
+          ? ` (${field.minZeilen}–${field.maxZeilen} Zeilen)`
+          : field.minZeilen
+            ? ` (mind. ${field.minZeilen} Zeilen)`
+            : field.maxZeilen
+              ? ` (max. ${field.maxZeilen} Zeilen)`
+              : ''
+        schema = z.array(z.object(rowShape)).describe(
+          (field.beschreibung ?? field.label) + rowConstraint,
+        )
       } else {
         schema = z.array(z.string()).describe(field.beschreibung ?? field.label)
       }

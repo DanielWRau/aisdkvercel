@@ -52,19 +52,21 @@ export function useBedarfsStatusFooter() {
   const { activeTab, tabContents } = useWorkspace()
   const { setStatusText, setCopyContent } = useStatusFooter()
 
-  useEffect(() => {
-    const current = tabContents[activeTab]
-    const label = current.status === 'done' ? 'Generiert' : 'Entwurf'
-    setStatusText(label)
-  }, [activeTab, tabContents, setStatusText])
+  // Extract only the active tab's values so effects don't fire when other tabs change
+  const currentStatus = tabContents[activeTab].status
+  const currentContent = tabContents[activeTab].content
 
   useEffect(() => {
-    const current = tabContents[activeTab]
-    if (current.status === 'done' && current.content) {
-      setCopyContent(contentToText(activeTab, current.content))
+    const label = currentStatus === 'done' ? 'Generiert' : 'Entwurf'
+    setStatusText(label)
+  }, [activeTab, currentStatus, setStatusText])
+
+  useEffect(() => {
+    if (currentStatus === 'done' && currentContent) {
+      setCopyContent(contentToText(activeTab, currentContent))
     } else {
       setCopyContent(null)
     }
     return () => setCopyContent(null)
-  }, [activeTab, tabContents, setCopyContent])
+  }, [activeTab, currentStatus, currentContent, setCopyContent])
 }

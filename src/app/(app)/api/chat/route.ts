@@ -7,11 +7,12 @@ import { getPayloadClient } from '@/lib/payload'
 import { withAuth, readBodySafe } from '@/lib/auth'
 import type { WorkflowSettingsData } from '@/types/user-settings'
 import { persistToolResult } from '@/lib/persist-tool-result'
+import { getVorlageById } from '@/data/gliederung-vorlagen'
 
 const CHAT_MODES = {
   workflow: {
     tools: ['askQuestions', 'marketResearch', 'generateSpec', 'knowledgeSearch', 'saveDocument'] as const,
-    persistTools: ['marketResearch', 'generateSpec'],
+    persistTools: ['askQuestions', 'marketResearch', 'generateSpec'],
   },
   knowledge: {
     tools: ['knowledgeSearch'] as const,
@@ -90,17 +91,41 @@ export const POST = withAuth(async (req, { user }) => {
   })
   const ws = settingsResult.docs[0]?.workflowSettings as WorkflowSettingsData | undefined
 
+  // Resolve gliederung: eigene or vorlage
+  let resolvedGliederung: string[] | undefined
+  if (ws?.eigeneGliederungAktiv && ws.eigeneGliederung) {
+    const parsed = ws.eigeneGliederung.split('\n').map(s => s.trim()).filter(Boolean)
+    if (parsed.length > 0) resolvedGliederung = parsed
+  } else if (ws?.gliederungVorlage && ws.gliederungVorlage !== 'standard') {
+    resolvedGliederung = getVorlageById(ws.gliederungVorlage)?.gliederung
+  }
+
   const dynamicAgent = createAgent({
     mode: modeHeader as ChatMode,
     tools: [...mode.tools],
     maxFrageRunden: ws?.maxFrageRunden ?? 2,
     fragenstil: ws?.fragenstil ?? 'standard',
+    marketResearchSettings: {
+      region: ws?.region,
+      groessenPraeferenz: ws?.groessenPraeferenz ?? 'alle',
+    },
+    specSettings: {
+      detailtiefe: ws?.detailtiefe ?? 'standard',
+      stil: ws?.stil ?? 'formal',
+      mitZeitplanung: ws?.mitZeitplanung ?? true,
+      gliederung: resolvedGliederung,
+    },
   })
 
   // Promise that resolves when the agent stream is fully consumed server-side.
   // Used with after() to keep the function alive even if the client disconnects.
   let resolveAgentDone: () => void
   const agentDone = new Promise<void>((r) => { resolveAgentDone = r })
+
+  // Accumulate askQuestions answers across rounds for robust server-side persistence.
+  // Each round yields only its own answers; we merge them so the saved document
+  // always contains the full set even if the client disconnects mid-workflow.
+  const accumulatedAnswers: unknown[] = []
 
   const response = await runWithSession(
     { sessionId, user: user as unknown as Record<string, unknown> & { id: string | number; role: string; email: string }, projectId },
@@ -113,18 +138,36 @@ export const POST = withAuth(async (req, { user }) => {
           resolveAgentDone()
         },
         onStepFinish: async (stepResult) => {
-          // Server-side persistence (secondary to client-side auto-save)
+          // Server-side persistence — authoritative save for all tool results.
+          // Runs inside after() so it completes even if the client disconnects.
           const persistable = stepResult.toolResults.filter(
-            (tr) => mode.persistTools.includes(tr.toolName),
+            (tr) => (mode.persistTools as readonly string[]).includes(tr.toolName),
           )
           for (const toolResult of persistable) {
             if ('preliminary' in toolResult && toolResult.preliminary) continue
             if (!toolResult.output) continue
 
+            let resultToSave = toolResult.output
+
+            // askQuestions: accumulate answers across rounds and wrap for transformer
+            if (toolResult.toolName === 'askQuestions') {
+              try {
+                const roundAnswers = typeof toolResult.output === 'string'
+                  ? JSON.parse(toolResult.output)
+                  : toolResult.output
+                if (Array.isArray(roundAnswers)) {
+                  accumulatedAnswers.push(...roundAnswers)
+                }
+                resultToSave = { answers: [...accumulatedAnswers], summary: '' }
+              } catch {
+                // If parsing fails, save raw output as-is
+              }
+            }
+
             try {
               const result = await persistToolResult({
                 toolType: toolResult.toolName,
-                result: toolResult.output,
+                result: resultToSave,
                 projectId,
                 user,
               })

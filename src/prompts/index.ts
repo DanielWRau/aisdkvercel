@@ -1,4 +1,4 @@
-export { getSystemPrompt, type SystemPromptOptions, type Fragenstil } from './system';
+export { getSystemPrompt, type SystemPromptOptions, type Fragenstil, type MarketResearchSettings, type SpecSettings } from './system';
 export {
   getMarketResearchPrompt,
   getPerplexityConfig,

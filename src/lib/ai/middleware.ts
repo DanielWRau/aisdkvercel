@@ -3,6 +3,7 @@ import type { LanguageModelV3Middleware, LanguageModelV3StreamPart } from '@ai-s
 const ENABLED = process.env.LOG_AI !== '0'
 
 export const loggingMiddleware: LanguageModelV3Middleware = {
+  specificationVersion: 'v3',
   wrapGenerate: async ({ doGenerate, model }) => {
     if (!ENABLED) return doGenerate()
     const start = Date.now()
